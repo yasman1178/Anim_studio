@@ -205,29 +205,52 @@ export function VideoCanvas({
               : "w-[240px] aspect-[9/16]"
           } ${isCameraShake ? "animate-shake" : ""}`}
         >
-          {/* Background Video or Anime Aesthetic Backdrop */}
-          {videoUrl ? (
-            <video
-              ref={videoRef}
-              src={videoUrl}
-              className="w-full h-full object-cover"
-              playsInline
-              onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
-              onLoadedMetadata={(e) => onDurationChange?.(e.currentTarget.duration)}
-            />
-          ) : (
-            <div className="w-full h-full bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex flex-col items-center justify-center p-4 text-center select-none">
-              <div className="w-12 h-12 rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-2">
-                <Sparkles className="w-6 h-6 animate-pulse" />
-              </div>
-              <div className="text-xs font-bold text-slate-200">
-                شاشة عرض الأنمي والدبلجة
-              </div>
-              <div className="text-[11px] text-slate-400 max-w-xs mt-1 leading-relaxed">
-                يتم عرض الفيديو الأصلي أو المحاكاة البصرية مع دمج المؤثرات الإجرائية والدبلجة
-              </div>
-            </div>
-          )}
+          {/* Background Video (Direct MP4/WebM or YouTube embed) or Anime Aesthetic Backdrop */}
+          {(() => {
+            if (!videoUrl) {
+              return (
+                <div className="w-full h-full bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex flex-col items-center justify-center p-4 text-center select-none">
+                  <div className="w-12 h-12 rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-2">
+                    <Sparkles className="w-6 h-6 animate-pulse" />
+                  </div>
+                  <div className="text-xs font-bold text-slate-200">
+                    شاشة عرض الأنمي والدبلجة
+                  </div>
+                  <div className="text-[11px] text-slate-400 max-w-xs mt-1 leading-relaxed">
+                    يتم عرض الفيديو الأصلي أو المحاكاة البصرية مع دمج المؤثرات الإجرائية والدبلجة
+                  </div>
+                </div>
+              );
+            }
+
+            // Check if YouTube link
+            const ytMatch = videoUrl.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+            const ytId = ytMatch && ytMatch[2].length === 11 ? ytMatch[2] : null;
+
+            if (ytId) {
+              return (
+                <iframe
+                  src={`https://www.youtube-nocookie.com/embed/${ytId}?rel=0&enablejsapi=1`}
+                  className="w-full h-full border-0"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                  allowFullScreen
+                />
+              );
+            }
+
+            // Standard HTML5 video
+            return (
+              <video
+                ref={videoRef}
+                src={videoUrl}
+                className="w-full h-full object-cover"
+                playsInline
+                controls={false}
+                onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
+                onLoadedMetadata={(e) => onDurationChange?.(e.currentTarget.duration)}
+              />
+            );
+          })()}
 
           {/* Procedural Canvas Layer */}
           <canvas

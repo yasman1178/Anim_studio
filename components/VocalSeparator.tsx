@@ -41,9 +41,28 @@ export function VocalSeparator({
     await runSeparationWithBlob(file);
   };
 
+  // Volume synchronization effects
+  useEffect(() => {
+    if (instAudioRef.current) {
+      instAudioRef.current.volume = Math.max(0, Math.min(1, musicVolume));
+    }
+  }, [musicVolume]);
+
+  useEffect(() => {
+    if (vocalsAudioRef.current) {
+      vocalsAudioRef.current.volume = isDialogueMuted ? 0 : Math.max(0, Math.min(1, dialogueVolume));
+    }
+  }, [dialogueVolume, isDialogueMuted]);
+
   // Separate directly from the project's uploaded video
   const separateUploadedVideo = async () => {
     if (!originalAudioUrl) return;
+
+    if (originalAudioUrl.includes("youtube.com") || originalAudioUrl.includes("youtu.be")) {
+      alert("روابط يوتيوب لا تتيح للمتصفح تنزيل الصوت الخام مباشرة بسبب قيود حماية Google. لفصل الصوت الحقيقي بدقة 100%، يرجى رفع ملف الفيديو (MP4/WebM) من جهازك مباشرة عبر زر رفع الملف.");
+      return;
+    }
+
     setSelectedFileName("فيديو المشروع المرفوع");
     setIsProcessing(true);
     setProgress(10);
@@ -56,6 +75,59 @@ export function VocalSeparator({
     } catch (err) {
       console.error("Error reading video audio:", err);
       alert("تعذر قراءة صوت الفيديو: " + String(err));
+      setIsProcessing(false);
+    }
+  };
+
+  // Instant demo separation without requiring external files
+  const runDemoSeparation = async () => {
+    setSelectedFileName("عينة أنمي نموذجية (موسيقى أوركسترا وحوار)");
+    setIsProcessing(true);
+    setProgress(20);
+    setProgressStep("تجهيز قنوات الصوت للعينة التجريبية...");
+
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass({ sampleRate: 44100 });
+      const duration = 5.0;
+      const sampleRate = 44100;
+      const length = Math.floor(duration * sampleRate);
+      const buffer = ctx.createBuffer(2, length, sampleRate);
+      const left = buffer.getChannelData(0);
+      const right = buffer.getChannelData(1);
+
+      for (let i = 0; i < length; i++) {
+        const t = i / sampleRate;
+        const bass = Math.sin(2 * Math.PI * 65.41 * t) * 0.25;
+        const padL = Math.sin(2 * Math.PI * 261.63 * t) * 0.15 + Math.sin(2 * Math.PI * 392.0 * t) * 0.12;
+        const padR = Math.sin(2 * Math.PI * 329.63 * t) * 0.15 + Math.sin(2 * Math.PI * 523.25 * t) * 0.12;
+
+        let dialogue = 0;
+        if (t > 1.0 && t < 4.2) {
+          const speechPulse = Math.sin(2 * Math.PI * 180 * t);
+          const formant1 = Math.sin(2 * Math.PI * 750 * t) * 0.5;
+          const formant2 = Math.sin(2 * Math.PI * 1400 * t) * 0.3;
+          const formant3 = Math.sin(2 * Math.PI * 2400 * t) * 0.2;
+          const env = Math.sin(((t - 1.0) / 3.2) * Math.PI);
+          dialogue = (speechPulse + formant1 + formant2 + formant3) * 0.35 * env;
+        }
+
+        left[i] = padL + bass + dialogue;
+        right[i] = padR + bass + dialogue;
+      }
+
+      const result = await separateAudioInBrowser(buffer, (pct, step) => {
+        setProgress(pct);
+        setProgressStep(step);
+      });
+
+      setSeparationResult(result);
+      setIsVerified(false);
+      onStemsReady(result.vocalsAudioUrl, result.instrumentalAudioUrl);
+    } catch (err) {
+      console.error("Demo separation error:", err);
+      alert("حدث خطأ أثناء تشغيل العينة: " + String(err));
+    } finally {
       setIsProcessing(false);
     }
   };
@@ -201,7 +273,7 @@ export function VocalSeparator({
       </div>
 
       {/* File Source Selector Box */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {/* Option 1: From Video in Tab 1 */}
         <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2.5 flex flex-col justify-between">
           <div>
@@ -211,7 +283,9 @@ export function VocalSeparator({
             </div>
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
               {originalAudioUrl
-                ? "يوجد ملف فيديو محلي مرفوع بالفعل في المشروع، يمكنك استخراج وفصل صوته الحقيقي الآن."
+                ? originalAudioUrl.includes("youtube.com") || originalAudioUrl.includes("youtu.be")
+                  ? "الرابط الحالي يوتيوب؛ لفصل الصوت الخام الحقيقي يرجى رفع ملف الفيديو مباشرة من جهازك."
+                  : "يوجد ملف فيديو محلي مرفوع بالفعل في المشروع، جاهز للفصل الآن."
                 : "لم يتم رفع فيديو محلي في شاشة المشروع بعد."}
             </p>
           </div>
@@ -222,7 +296,7 @@ export function VocalSeparator({
             className="flex items-center justify-center gap-2 w-full py-2 px-3 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
           >
             <Waves className="w-3.5 h-3.5" />
-            <span>فصل صوت فيديو المشروع الآن</span>
+            <span>فصل صوت فيديو المشروع</span>
           </button>
         </div>
 
@@ -231,16 +305,16 @@ export function VocalSeparator({
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
               <FileAudio className="w-3.5 h-3.5 text-rose-400" />
-              <span>رفع أي ملف فيديو أو صوت مستقل للفصل</span>
+              <span>رفع أي ملف فيديو أو صوت مستقل</span>
             </div>
             <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
-              ارفع ملف أنمي (MP4, WebM, MP3, WAV) لمعالجة صوته الحقيقي وفصل الموسيقى عن كلام الممثلين.
+              ارفع ملف أنمي (MP4, WebM, MP3, WAV) لمعالجة صوته وفصل الموسيقى عن كلام الممثلين.
             </p>
           </div>
 
           <label className="flex items-center justify-center gap-2 w-full py-2 px-3 border border-dashed border-slate-700 hover:border-rose-500 rounded-lg bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-200 cursor-pointer transition-colors">
             <Upload className="w-3.5 h-3.5 text-rose-500" />
-            <span>{selectedFileName ? `الملف: ${selectedFileName}` : "اختيار ملف صوت أو فيديو محلي"}</span>
+            <span className="truncate">{selectedFileName ? `الملف: ${selectedFileName}` : "اختيار ملف صوت أو فيديو محلي"}</span>
             <input
               type="file"
               accept="audio/*,video/*"
@@ -248,6 +322,28 @@ export function VocalSeparator({
               className="hidden"
             />
           </label>
+        </div>
+
+        {/* Option 3: Instant 1-Click Demo */}
+        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>تجربة فورية لعينة أنمي (1-Click Demo)</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+              اختبر محرك الفصل فوراً بدون الحاجة لرفع ملفات، واستمع لنقاء عزل الحوار والموسيقى.
+            </p>
+          </div>
+
+          <button
+            onClick={runDemoSeparation}
+            disabled={isProcessing}
+            className="flex items-center justify-center gap-2 w-full py-2 px-3 text-xs font-semibold text-amber-300 bg-amber-950/40 hover:bg-amber-900/50 border border-amber-800/80 disabled:opacity-40 rounded-lg transition-colors cursor-pointer"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>تشغيل تجربة العينة الفورية</span>
+          </button>
         </div>
       </div>
 

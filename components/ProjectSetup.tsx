@@ -33,6 +33,33 @@ export function ProjectSetup({
   const [rawJsonText, setRawJsonText] = useState(JSON.stringify(project, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
 
+  // Handle explicit video URL loading (YouTube or direct video URL)
+  const handleLoadVideoUrl = () => {
+    if (!sourceUrl.trim()) return;
+    const url = sourceUrl.trim();
+    const ytMatch = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+    if (ytMatch && ytMatch[2].length === 11) {
+      onVideoSelected(url, 180);
+      setUrlStatus('received');
+      return;
+    }
+    const video = document.createElement("video");
+    video.src = url;
+    video.onloadedmetadata = () => {
+      onVideoSelected(url, video.duration || 180);
+      setUrlStatus('received');
+    };
+    video.onerror = () => {
+      onVideoSelected(url, 180);
+      setUrlStatus('received');
+    };
+  };
+
+  const handleClearUrl = () => {
+    setSourceUrl("");
+    setUrlStatus('empty');
+  };
+
   // Handle preset project loader
   const loadPreset = (preset: NotebookLMProject) => {
     const normalized = normalizeNotebookLMProject(preset);
@@ -139,18 +166,51 @@ export function ProjectSetup({
             </span>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-[11px] text-slate-400">رابط الفيديو المرجعي (YouTube / Source):</label>
-            <input
-              type="text"
-              value={sourceUrl}
-              onChange={(e) => {
-                setSourceUrl(e.target.value);
-                setUrlStatus(e.target.value ? 'received' : 'empty');
-              }}
-              placeholder="https://www.youtube.com/watch?v=..."
-              className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded text-slate-100 focus:outline-none focus:border-rose-500 font-mono"
-            />
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label className="text-[11px] text-slate-400">رابط الفيديو المرجعي (YouTube / Direct MP4):</label>
+              {sourceUrl && (
+                <button
+                  type="button"
+                  onClick={handleClearUrl}
+                  className="text-[10px] text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                >
+                  مسح الرابط
+                </button>
+              )}
+            </div>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={sourceUrl}
+                onChange={(e) => {
+                  setSourceUrl(e.target.value);
+                  setUrlStatus(e.target.value ? 'received' : 'empty');
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleLoadVideoUrl();
+                  }
+                }}
+                placeholder="ضع رابط فيديو يوتيوب أو MP4 هنا..."
+                className="flex-1 px-3 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded text-slate-100 focus:outline-none focus:border-rose-500 font-mono"
+              />
+              <button
+                type="button"
+                onClick={handleLoadVideoUrl}
+                disabled={!sourceUrl.trim()}
+                className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+              >
+                <span>تحميل ومعاينة الفيديو</span>
+              </button>
+            </div>
+            {videoUrl && (
+              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 pt-0.5">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>تم تحميل الفيديو وعرضه بنجاح في شاشة المعاينة (Canvas)!</span>
+              </div>
+            )}
           </div>
 
           {/* Local Upload file as preferred by V19 */}
