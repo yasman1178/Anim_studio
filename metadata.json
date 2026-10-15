@@ -1,0 +1,6 @@
+{
+  "name": "Anime Dub Studio - محب أنمي",
+  "description": "استوديو دبلجة الأنمي الاحترافي باللهجة المصرية لقناة «محب أنمي»، مع فصل مجاني للصوت والموسيقى وتوليد أصوات Edge-TTS ومحرر خط زمني متكامل.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
