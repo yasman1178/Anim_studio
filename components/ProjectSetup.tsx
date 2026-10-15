@@ -1,8 +1,13 @@
 "use client";
 
 import React, { useState } from "react";
-import { NotebookLMProject, SAMPLE_PROJECT_SOLO_LEVELING, SAMPLE_PROJECT_JUJUTSU } from "@/lib/sample-data";
-import { ValidationResult } from "@/lib/validate-json";
+import {
+  NotebookLMProject,
+  SAMPLE_PROJECT_SOLO_LEVELING,
+  SAMPLE_PROJECT_JUJUTSU,
+  SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3
+} from "@/lib/sample-data";
+import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
 import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, AlertTriangle, RefreshCw, Sparkles, Code2 } from "lucide-react";
 
 interface ProjectSetupProps {
@@ -30,13 +35,14 @@ export function ProjectSetup({
 
   // Handle preset project loader
   const loadPreset = (preset: NotebookLMProject) => {
-    onUpdateProject(preset);
-    setRawJsonText(JSON.stringify(preset, null, 2));
-    setSourceUrl(preset.project_info.source_url || "");
+    const normalized = normalizeNotebookLMProject(preset);
+    onUpdateProject(normalized);
+    setRawJsonText(JSON.stringify(normalized, null, 2));
+    setSourceUrl(normalized.project_info.source_url || "");
     setUrlStatus('received');
   };
 
-  // Handle custom JSON upload
+  // Handle custom JSON upload with automatic normalization
   const handleJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -44,8 +50,9 @@ export function ProjectSetup({
     reader.onload = (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
-        onUpdateProject(parsed);
-        setRawJsonText(JSON.stringify(parsed, null, 2));
+        const normalized = normalizeNotebookLMProject(parsed);
+        onUpdateProject(normalized);
+        setRawJsonText(JSON.stringify(normalized, null, 2));
         setJsonError(null);
       } catch (err) {
         setJsonError("خطأ في قراءة ملف JSON: " + String(err));
@@ -66,11 +73,13 @@ export function ProjectSetup({
     };
   };
 
-  // Apply raw JSON edits
+  // Apply raw JSON edits with normalization
   const applyJsonEdits = () => {
     try {
       const parsed = JSON.parse(rawJsonText);
-      onUpdateProject(parsed);
+      const normalized = normalizeNotebookLMProject(parsed);
+      onUpdateProject(normalized);
+      setRawJsonText(JSON.stringify(normalized, null, 2));
       setJsonError(null);
       setShowJsonEditor(false);
     } catch (err) {
@@ -93,8 +102,14 @@ export function ProjectSetup({
         </div>
 
         {/* 1-Click Sample Loaders */}
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-slate-400">نماذج جاهزة:</span>
+          <button
+            onClick={() => loadPreset(SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3)}
+            className="px-2.5 py-1 text-xs font-semibold text-rose-300 bg-rose-950/50 hover:bg-rose-900/50 border border-rose-800/80 rounded-md transition-colors cursor-pointer"
+          >
+            ★ سولو ليفلينج الموسم 3 (3 دقائق)
+          </button>
           <button
             onClick={() => loadPreset(SAMPLE_PROJECT_SOLO_LEVELING)}
             className="px-2.5 py-1 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors cursor-pointer"
