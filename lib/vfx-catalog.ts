@@ -1,3 +1,5 @@
+import { playSfx } from "./sfx-synthesizer";
+
 export interface VfxItem {
   id: string;
   name_ar: string;
@@ -8,6 +10,15 @@ export interface VfxItem {
 }
 
 export const VFX_CATALOG: VfxItem[] = [
+  // Dark Fantasy & V18 Specials
+  {
+    id: "dark_purple_shadow_aura",
+    name_ar: "هالة طاقة الظلال البنفسجية (Seif Shadow Aura)",
+    category: "energy",
+    description_ar: "هالة ظلال غامضة باللون البنفسجي الداكن والأسود تحيط بالخنجر وبسيف في لحظات الخطر.",
+    isProcedural: true,
+    defaultDurationSec: 3.5
+  },
   // Combat & Action
   {
     id: "speed_lines",
@@ -103,118 +114,22 @@ export const VFX_CATALOG: VfxItem[] = [
   }
 ];
 
-export interface SfxItem {
+export interface SfxCatalogItem {
   id: string;
   name_ar: string;
   category: string;
-  synthType: 'whoosh' | 'impact' | 'slash' | 'charge' | 'rumble' | 'beep';
+  sfxName: string;
 }
 
-export const SFX_CATALOG: SfxItem[] = [
-  { id: "whoosh", name_ar: "صوت حركة سريعة (Whoosh)", category: "حركة", synthType: "whoosh" },
-  { id: "heavy_impact", name_ar: "صدمة وارتطام ثقيل (Heavy Impact)", category: "قتال", synthType: "impact" },
-  { id: "slash", name_ar: "ضربة سيف حادة (Sword Slash)", category: "أسلحة", synthType: "slash" },
-  { id: "energy_charge", name_ar: "شحن طاقة خارقة (Energy Charge)", category: "خوارق", synthType: "charge" },
-  { id: "energy_pulse", name_ar: "نبضة طاقة (Energy Pulse)", category: "خوارق", synthType: "beep" },
-  { id: "low_rumble", name_ar: "هدير وزلزال منخفض (Low Rumble)", category: "أجواء", synthType: "rumble" },
-  { id: "lightning_burst", name_ar: "صاعقة رعدية (Lightning Bolt)", category: "طبيعة", synthType: "impact" }
+export const SFX_CATALOG: SfxCatalogItem[] = [
+  { id: "sub_boom", name_ar: "Sub Boom ضربة بيز الخطاف", category: "سينمائي Hook", sfxName: "Sub Boom Impact" },
+  { id: "giant_roar", name_ar: "Giant Roar زئير الوحش", category: "وحوش وعمالقة", sfxName: "Giant Monster Roar" },
+  { id: "fast_swoosh", name_ar: "Swoosh حركة وسوط سريع", category: "انتقالات وحركة", sfxName: "Swoosh Fast Whip" },
+  { id: "slow_heartbeat", name_ar: "Heartbeat نبض القلب الدرامي", category: "شجن وصدمة", sfxName: "Heartbeat Slow" },
+  { id: "dark_aura", name_ar: "Dark Aura هالة الظلال السحرية", category: "طاقة وسحر", sfxName: "Dark Shadow Energy Aura" },
+  { id: "glitch_shock", name_ar: "Glitch صدمة النظام الرقمي", category: "واجهة النظام", sfxName: "Glitch System Shock" }
 ];
 
-// In-Browser Web Audio SFX Synthesizer
-// Generates realistic procedural anime SFX on the fly with zero external dependencies!
-export function playSynthesizedSfx(type: string, volume: number = 0.5) {
-  try {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (!AudioCtx) return;
-    const ctx = new AudioCtx();
-    const now = ctx.currentTime;
-    const masterGain = ctx.createGain();
-    masterGain.gain.setValueAtTime(volume, now);
-    masterGain.connect(ctx.destination);
-
-    if (type === 'whoosh') {
-      // Noise buffer filtered with rising then falling cutoff
-      const bufferSize = ctx.sampleRate * 0.4;
-      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-      const output = buffer.getChannelData(0);
-      for (let i = 0; i < bufferSize; i++) {
-        output[i] = Math.random() * 2 - 1;
-      }
-      const whiteNoise = ctx.createBufferSource();
-      whiteNoise.buffer = buffer;
-
-      const filter = ctx.createBiquadFilter();
-      filter.type = 'bandpass';
-      filter.frequency.setValueAtTime(200, now);
-      filter.frequency.exponentialRampToValueAtTime(1800, now + 0.15);
-      filter.frequency.exponentialRampToValueAtTime(100, now + 0.38);
-
-      const gain = ctx.createGain();
-      gain.gain.setValueAtTime(0.01, now);
-      gain.gain.linearRampToValueAtTime(0.8, now + 0.15);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.38);
-
-      whiteNoise.connect(filter);
-      filter.connect(gain);
-      gain.connect(masterGain);
-      whiteNoise.start(now);
-      whiteNoise.stop(now + 0.4);
-    } else if (type === 'impact') {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(180, now);
-      osc.frequency.exponentialRampToValueAtTime(30, now + 0.4);
-
-      gain.gain.setValueAtTime(1.0, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.5);
-
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.5);
-    } else if (type === 'slash') {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(900, now);
-      osc.frequency.exponentialRampToValueAtTime(120, now + 0.25);
-
-      gain.gain.setValueAtTime(0.7, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.25);
-
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.28);
-    } else if (type === 'charge') {
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'triangle';
-      osc.frequency.setValueAtTime(120, now);
-      osc.frequency.exponentialRampToValueAtTime(800, now + 0.8);
-
-      gain.gain.setValueAtTime(0.1, now);
-      gain.gain.linearRampToValueAtTime(0.7, now + 0.6);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.85);
-
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.85);
-    } else {
-      // Default notification beep
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.frequency.setValueAtTime(520, now);
-      gain.gain.setValueAtTime(0.4, now);
-      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.2);
-      osc.connect(gain);
-      gain.connect(masterGain);
-      osc.start(now);
-      osc.stop(now + 0.2);
-    }
-  } catch {
-    // Ignore audio context errors if user hasn't interacted with page yet
-  }
+export function playSynthesizedSfx(sfxIdOrName: string, volume: number = 80) {
+  playSfx(sfxIdOrName, volume);
 }

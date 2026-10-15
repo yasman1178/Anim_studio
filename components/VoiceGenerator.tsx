@@ -40,10 +40,15 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
     const line = shot.dialogue[lineIndex];
     if (!line) return;
 
-    setActiveGeneratingId(line.id);
+    const lineId = line.id || `shot_${shotIndex + 1}_dlg_${lineIndex + 1}`;
+    setActiveGeneratingId(lineId);
+
+    const spokenText = line.line || line.line_egyptian || "";
 
     try {
-      const charMapping = project.character_voice_mapping[line.character] || {
+      const vocalCue = line.voice_profile || line.vocal_cue || shot.vocal_cue || "narrator";
+      const charKey = line.character || line.speaker || "seif";
+      const charMapping = project.character_voice_mapping?.[charKey] || {
         voice_name: line.voice_model || "ar-EG-ShakirNeural",
         pitch: "+0Hz",
         rate: "+0%"
@@ -53,7 +58,8 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          text: line.line_egyptian,
+          text: spokenText,
+          vocal_cue: vocalCue,
           voice: charMapping.voice_name || line.voice_model,
           pitch: charMapping.pitch,
           rate: charMapping.rate
@@ -74,26 +80,26 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         // Save generated dialogue to IndexedDB storage
         saveAudioUrlAsset(
           data.audio_url,
-          `دبلجة [${line.character}] - لقطة ${shotIndex + 1}.mp3`,
+          `دبلجة [${charKey}] - لقطة ${shotIndex + 1}.mp3`,
           'tts_audio',
-          { shotIndex, role: line.character, duration: data.duration_seconds }
+          { shotIndex, role: charKey, duration: data.duration_seconds }
         );
 
         // Auto play generated audio
-        playAudio(line.id, data.audio_url, line.line_egyptian);
+        playAudio(lineId, data.audio_url, spokenText);
       } else {
         // Fallback to native speech
-        speakNative(line.line_egyptian, line.id);
+        speakNative(spokenText, lineId);
       }
     } catch (err) {
       console.error("TTS generation error:", err);
-      speakNative(line.line_egyptian, line.id);
+      speakNative(spokenText, lineId);
     } finally {
       setActiveGeneratingId(null);
     }
   };
 
-  // Generate Voiceover line
+  // Generate Voiceover line with v18 vocal_cue
   const generateVoiceover = async (shotIndex: number) => {
     const shot = project.shots[shotIndex];
     if (!shot.voiceover_egyptian) return;
@@ -102,14 +108,13 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
     setActiveGeneratingId(voId);
 
     try {
+      const vocalCue = shot.vocal_cue || "narrator";
       const res = await fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: shot.voiceover_egyptian,
-          voice: "ar-EG-ShakirNeural",
-          pitch: "-2Hz",
-          rate: "+0%"
+          vocal_cue: vocalCue
         })
       });
 
@@ -145,20 +150,25 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
       const shot = updatedProject.shots[sIdx];
       for (let dIdx = 0; dIdx < shot.dialogue.length; dIdx++) {
         const line = shot.dialogue[dIdx];
-        setActiveGeneratingId(line.id);
+        const lineId = line.id || `shot_${sIdx + 1}_dlg_${dIdx + 1}`;
+        setActiveGeneratingId(lineId);
 
         try {
-          const charMapping = project.character_voice_mapping[line.character] || {
+          const charKey = line.character || line.speaker || "seif";
+          const vocalCue = line.voice_profile || line.vocal_cue || shot.vocal_cue || "narrator";
+          const charMapping = project.character_voice_mapping?.[charKey] || {
             voice_name: line.voice_model || "ar-EG-ShakirNeural",
             pitch: "+0Hz",
             rate: "+0%"
           };
+          const spokenText = line.line || line.line_egyptian || "";
 
           const res = await fetch("/api/tts", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              text: line.line_egyptian,
+              text: spokenText,
+              vocal_cue: vocalCue,
               voice: charMapping.voice_name || line.voice_model,
               pitch: charMapping.pitch,
               rate: charMapping.rate
@@ -177,13 +187,13 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
             saveAudioUrlAsset(
               data.audio_url,
-              `دبلجة [${line.character}] - لقطة ${sIdx + 1}.mp3`,
+              `دبلجة [${charKey}] - لقطة ${sIdx + 1}.mp3`,
               'tts_audio',
-              { shotIndex: sIdx, role: line.character, duration: data.duration_seconds }
+              { shotIndex: sIdx, role: charKey, duration: data.duration_seconds }
             );
           }
         } catch (e) {
-          console.error("Error generating for line:", line.id, e);
+          console.error("Error generating for line:", lineId, e);
         }
 
         count++;
@@ -344,21 +354,25 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
               {/* Dialogue lines */}
               <div className="space-y-2">
                 {shot.dialogue.map((line, dIdx) => {
-                  const isOverDuration = line.duration_sec > shot.duration_seconds;
-                  const isGenerating = activeGeneratingId === line.id;
-                  const isPlaying = playingAudioId === line.id;
+                  const lineId = line.id || `shot_${sIdx + 1}_dlg_${dIdx + 1}`;
+                  const isOverDuration = (line.duration_sec ?? 0) > (shot.duration_sec ?? shot.duration_seconds);
+                  const isGenerating = activeGeneratingId === lineId;
+                  const isPlaying = playingAudioId === lineId;
+                  const spokenText = line.line || line.line_egyptian || "";
+                  const speakerLabel = line.speaker || line.character_ar || line.character || "سيف";
+                  const vocalCue = line.voice_profile || line.vocal_cue;
 
                   return (
                     <div
-                      key={line.id}
+                      key={lineId}
                       className="p-2.5 rounded-lg bg-slate-900 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs"
                     >
                       <div className="space-y-1 flex-1 min-w-[240px]">
                         <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-200">{line.character_ar || line.character}</span>
-                          {line.vocal_cue && (
+                          <span className="font-bold text-slate-200">{speakerLabel}</span>
+                          {vocalCue && (
                             <span className="text-[11px] text-amber-400/90 font-mono">
-                              ({line.vocal_cue})
+                              ({vocalCue})
                             </span>
                           )}
                           <span className="text-[11px] font-mono tabular-nums text-slate-400">
@@ -366,7 +380,7 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
                           </span>
                         </div>
                         <p className="text-slate-100 font-medium text-[13px] leading-relaxed">
-                          &quot;{line.line_egyptian}&quot;
+                          &quot;{spokenText}&quot;
                         </p>
                         {line.line_original && (
                           <div className="text-[11px] text-slate-500 font-mono">
@@ -393,7 +407,7 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
                         <button
                           onClick={() => {
                             if (line.audio_url) {
-                              playAudio(line.id, line.audio_url, line.line_egyptian);
+                              playAudio(lineId, line.audio_url, spokenText);
                             } else {
                               generateLineVoice(sIdx, dIdx);
                             }

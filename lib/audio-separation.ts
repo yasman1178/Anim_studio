@@ -226,10 +226,10 @@ export async function separateAudioInBrowser(
   onProgress?.(85, "تجهيز ملفات الصوت المعزولة للمعاينة A/B...");
 
   const vocalsBlob = bufferToWave(vocalsBuffer);
-  const instBlob = bufferToWave(instBuffer);
+  const instrumentalBlob = bufferToWave(instBuffer);
 
   const vocalsAudioUrl = URL.createObjectURL(vocalsBlob);
-  const instrumentalAudioUrl = URL.createObjectURL(instBlob);
+  const instrumentalAudioUrl = URL.createObjectURL(instrumentalBlob);
 
   onProgress?.(100, "اكتمل الفصل بنجاح!");
 

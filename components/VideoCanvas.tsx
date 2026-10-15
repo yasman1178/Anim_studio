@@ -1,13 +1,16 @@
 "use client";
 
 import React, { useRef, useEffect } from "react";
-import { Sparkles, Maximize2, Smartphone, Monitor } from "lucide-react";
+import { Sparkles, Smartphone, Monitor, Activity, Zap } from "lucide-react";
 
 interface VideoCanvasProps {
   aspectRatio: '16:9' | '9:16';
   onToggleAspectRatio: (ratio: '16:9' | '9:16') => void;
   activeVfxType?: string | null;
   textOverlay?: string | null;
+  activeVoiceover?: string | null;
+  cameraMotion?: string | null;
+  currentBeat?: string | null;
   videoUrl?: string | null;
   currentTime: number;
   isPlaying: boolean;
@@ -20,6 +23,9 @@ export function VideoCanvas({
   onToggleAspectRatio,
   activeVfxType,
   textOverlay,
+  activeVoiceover,
+  cameraMotion,
+  currentBeat,
   videoUrl,
   currentTime,
   isPlaying,
@@ -63,7 +69,33 @@ export function VideoCanvas({
       const cx = w / 2;
       const cy = h / 2;
 
-      if (activeVfxType === "speed_lines") {
+      if (activeVfxType === "dark_purple_shadow_aura") {
+        // V18 Seif Signature: Dark Purple Shadow Energy Wisps
+        const pulse = Math.sin(frame * 0.08) * 0.25 + 0.65;
+        const grad = ctx.createRadialGradient(cx, cy * 1.1, 30, cx, cy * 1.1, Math.max(w, h) * 0.7);
+        grad.addColorStop(0, "transparent");
+        grad.addColorStop(0.5, `rgba(109, 40, 217, ${0.35 * pulse})`);
+        grad.addColorStop(0.85, `rgba(76, 29, 149, ${0.55 * pulse})`);
+        grad.addColorStop(1, `rgba(15, 23, 42, ${0.75 * pulse})`);
+        ctx.fillStyle = grad;
+        ctx.fillRect(0, 0, w, h);
+
+        // Shadow tendrils
+        ctx.strokeStyle = "rgba(168, 85, 247, 0.4)";
+        ctx.lineWidth = 2.0;
+        for (let i = 0; i < 5; i++) {
+          ctx.beginPath();
+          let tx = cx + (i - 2) * (w * 0.15);
+          let ty = h;
+          ctx.moveTo(tx, ty);
+          while (ty > h * 0.3) {
+            tx += Math.sin(frame * 0.05 + i + ty * 0.02) * 8;
+            ty -= 18;
+            ctx.lineTo(tx, ty);
+          }
+          ctx.stroke();
+        }
+      } else if (activeVfxType === "speed_lines") {
         // Draw anime speed lines radiating outward/inward
         ctx.strokeStyle = "rgba(255, 255, 255, 0.55)";
         ctx.lineWidth = 1.8;
@@ -78,7 +110,7 @@ export function VideoCanvas({
           ctx.stroke();
         }
       } else if (activeVfxType === "blue_aura") {
-        // Glowing pulsing blue aura
+        // Glowing pulsing cyan-blue aura
         const pulse = Math.sin(frame * 0.08) * 0.2 + 0.5;
         const gradient = ctx.createRadialGradient(cx, cy, 40, cx, cy, Math.max(w, h) * 0.6);
         gradient.addColorStop(0, "transparent");
@@ -127,18 +159,7 @@ export function VideoCanvas({
           ctx.stroke();
         }
         ctx.shadowBlur = 0;
-      } else if (activeVfxType === "slash_arc") {
-        // Curved sword slash
-        ctx.strokeStyle = "rgba(254, 240, 138, 0.9)";
-        ctx.lineWidth = 4;
-        ctx.shadowColor = "#facc15";
-        ctx.shadowBlur = 20;
-        ctx.beginPath();
-        ctx.arc(cx, cy, Math.min(w, h) * 0.45, -Math.PI * 0.8, -Math.PI * 0.2);
-        ctx.stroke();
-        ctx.shadowBlur = 0;
       } else if (activeVfxType === "vignette") {
-        // Soft cinematic vignette
         const grad = ctx.createRadialGradient(cx, cy, Math.min(w, h) * 0.35, cx, cy, Math.max(w, h) * 0.7);
         grad.addColorStop(0, "transparent");
         grad.addColorStop(1, "rgba(0, 0, 0, 0.75)");
@@ -154,76 +175,88 @@ export function VideoCanvas({
     return () => cancelAnimationFrame(animId);
   }, [activeVfxType]);
 
-  const isCameraShake = activeVfxType === "camera_shake";
+  // Determine dynamic camera motion classes
+  let cameraClass = "";
+  if (cameraMotion === "shake" || activeVfxType === "camera_shake") {
+    cameraClass = "animate-shake";
+  } else if (cameraMotion === "zoom_in") {
+    cameraClass = "scale-105 transition-transform duration-1000";
+  } else if (cameraMotion === "zoom_out") {
+    cameraClass = "scale-95 transition-transform duration-1000";
+  } else if (cameraMotion === "pan_left") {
+    cameraClass = "-translate-x-2 transition-transform duration-1000";
+  } else if (cameraMotion === "pan_right") {
+    cameraClass = "translate-x-2 transition-transform duration-1000";
+  }
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-4 space-y-3">
+    <div className="rounded-2xl border border-slate-800 bg-slate-900/90 p-3 sm:p-4 space-y-3 shadow-xl">
       {/* Video Canvas Header & Aspect Switcher */}
-      <div className="flex items-center justify-between gap-3 pb-2 border-b border-slate-800">
+      <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-800">
         <div className="text-xs font-semibold text-slate-300 flex items-center gap-2">
-          <span>معاينة الرندر المباشر (Remotion Preview Canvas)</span>
+          <span>شاشة العرض والمونتاج (9:16 Shorts)</span>
           {activeVfxType && (
-            <span className="text-[11px] font-mono text-rose-400">
-              · مؤثر نشط: {activeVfxType}
+            <span className="text-[11px] font-mono text-rose-400 truncate max-w-[150px]">
+              · {activeVfxType}
             </span>
           )}
         </div>
 
-        {/* Aspect Ratio Switcher (Segmented Control) */}
+        {/* Aspect Ratio Switcher */}
         <div className="flex items-center gap-1 p-0.5 bg-slate-950 rounded-lg border border-slate-800 text-xs">
           <button
-            onClick={() => onToggleAspectRatio('16:9')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-colors cursor-pointer ${
-              aspectRatio === '16:9'
-                ? "bg-slate-800 text-white font-medium shadow-sm"
-                : "text-slate-400 hover:text-slate-200"
-            }`}
-          >
-            <Monitor className="w-3.5 h-3.5" />
-            <span>16:9 (يوتيوب)</span>
-          </button>
-          <button
             onClick={() => onToggleAspectRatio('9:16')}
-            className={`flex items-center gap-1.5 px-2.5 py-1 rounded transition-colors cursor-pointer ${
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors cursor-pointer min-h-[36px] ${
               aspectRatio === '9:16'
                 ? "bg-rose-600 text-white font-medium shadow-sm"
                 : "text-slate-400 hover:text-slate-200"
             }`}
           >
             <Smartphone className="w-3.5 h-3.5" />
-            <span>9:16 (شورتس/تأطير ذكي)</span>
+            <span>9:16 شورتس</span>
+          </button>
+          <button
+            onClick={() => onToggleAspectRatio('16:9')}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition-colors cursor-pointer min-h-[36px] ${
+              aspectRatio === '16:9'
+                ? "bg-slate-800 text-white font-medium shadow-sm"
+                : "text-slate-400 hover:text-slate-200"
+            }`}
+          >
+            <Monitor className="w-3.5 h-3.5" />
+            <span>16:9 يوتيوب</span>
           </button>
         </div>
       </div>
 
       {/* Screen Frame Container */}
-      <div className="flex items-center justify-center bg-black/90 rounded-lg p-2 overflow-hidden min-h-[300px]">
+      <div className="flex items-center justify-center bg-slate-950/90 rounded-xl p-2 sm:p-3 overflow-hidden min-h-[320px] sm:min-h-[380px]">
         <div
-          className={`relative bg-slate-950 rounded border border-slate-800 overflow-hidden shadow-2xl transition-all duration-300 ${
+          className={`relative bg-slate-950 rounded-xl border border-slate-800 overflow-hidden shadow-2xl transition-all duration-300 ${
             aspectRatio === '16:9'
               ? "w-full max-w-[560px] aspect-video"
-              : "w-[240px] aspect-[9/16]"
-          } ${isCameraShake ? "animate-shake" : ""}`}
+              : "w-[240px] sm:w-[270px] aspect-[9/16]"
+          } ${cameraClass}`}
         >
-          {/* Background Video (Direct MP4/WebM or YouTube embed) or Anime Aesthetic Backdrop */}
+          {/* Background Video or Dark Fantasy Atmosphere */}
           {(() => {
             if (!videoUrl) {
               return (
-                <div className="w-full h-full bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 flex flex-col items-center justify-center p-4 text-center select-none">
-                  <div className="w-12 h-12 rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-2">
+                <div className="w-full h-full bg-gradient-to-br from-slate-950 via-[#120B20] to-[#0A1128] flex flex-col items-center justify-center p-4 text-center select-none relative overflow-hidden">
+                  <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-indigo-900/20 via-transparent to-transparent pointer-events-none" />
+                  <div className="w-12 h-12 rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-400 mb-2 z-10 shadow-lg shadow-rose-900/30">
                     <Sparkles className="w-6 h-6 animate-pulse" />
                   </div>
-                  <div className="text-xs font-bold text-slate-200">
-                    شاشة عرض الأنمي والدبلجة
+                  <div className="text-xs font-bold text-slate-100 z-10">
+                    حكاية سيف — سلسلة الأنمي
                   </div>
-                  <div className="text-[11px] text-slate-400 max-w-xs mt-1 leading-relaxed">
-                    يتم عرض الفيديو الأصلي أو المحاكاة البصرية مع دمج المؤثرات الإجرائية والدبلجة
+                  <div className="text-[10px] text-slate-400 max-w-[200px] mt-1 leading-relaxed z-10">
+                    معاينة تلقائية عمودية (9:16) متوافقة مع يوتيوب شورتس وريلز وتيك توك
                   </div>
                 </div>
               );
             }
 
-            // Check if YouTube link
             const ytMatch = videoUrl.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
             const ytId = ytMatch && ytMatch[2].length === 11 ? ytMatch[2] : null;
 
@@ -238,7 +271,6 @@ export function VideoCanvas({
               );
             }
 
-            // Standard HTML5 video
             return (
               <video
                 ref={videoRef}
@@ -255,19 +287,41 @@ export function VideoCanvas({
           {/* Procedural Canvas Layer */}
           <canvas
             ref={canvasRef}
-            width={aspectRatio === '16:9' ? 560 : 240}
-            height={aspectRatio === '16:9' ? 315 : 426}
+            width={aspectRatio === '16:9' ? 560 : 270}
+            height={aspectRatio === '16:9' ? 315 : 480}
             className="absolute inset-0 w-full h-full pointer-events-none z-10"
           />
 
-          {/* Text Overlay (Title of the shot from JSON) */}
-          {textOverlay && (
-            <div className="absolute bottom-4 left-3 right-3 text-center z-20 pointer-events-none">
-              <span className="inline-block px-3 py-1 bg-black/75 backdrop-blur border border-white/10 rounded text-xs font-bold text-amber-300 shadow-lg tracking-wide">
-                {textOverlay}
-              </span>
+          {/* Top Beat / Camera HUD */}
+          {(currentBeat || cameraMotion) && (
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between text-[10px] font-mono text-cyan-300 z-20 pointer-events-none">
+              {currentBeat && (
+                <span className="px-2 py-0.5 rounded bg-black/60 backdrop-blur border border-cyan-500/30 truncate max-w-[160px] flex items-center gap-1">
+                  <Activity className="w-3 h-3 text-cyan-400 animate-pulse" />
+                  <span>{currentBeat}</span>
+                </span>
+              )}
+              {cameraMotion && (
+                <span className="px-1.5 py-0.5 rounded bg-black/60 backdrop-blur border border-slate-700/50 text-slate-400">
+                  {cameraMotion}
+                </span>
+              )}
             </div>
           )}
+
+          {/* Dynamic Voiceover Subtitle & Overlay */}
+          <div className="absolute bottom-3 left-2 right-2 text-center z-20 pointer-events-none space-y-1">
+            {textOverlay && (
+              <div className="inline-block px-2.5 py-1 bg-black/80 backdrop-blur border border-amber-500/40 rounded-lg text-xs font-bold text-amber-300 shadow-xl tracking-wide max-w-full truncate">
+                {textOverlay}
+              </div>
+            )}
+            {activeVoiceover && (
+              <div className="px-2 py-1 bg-black/85 backdrop-blur-sm rounded border border-white/10 text-[11px] font-medium text-slate-100 leading-snug shadow-2xl">
+                {activeVoiceover}
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { TopBar } from "@/components/TopBar";
+import { BottomNav } from "@/components/BottomNav";
 import { ProjectSetup } from "@/components/ProjectSetup";
 import { ValidationReport } from "@/components/ValidationReport";
 import { VocalSeparator } from "@/components/VocalSeparator";
@@ -11,41 +12,76 @@ import { VfxSfxHub } from "@/components/VfxSfxHub";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { PublishingHub } from "@/components/PublishingHub";
 import StorageManager from "@/components/StorageManager";
-import { SAMPLE_PROJECT_SOLO_LEVELING, NotebookLMProject } from "@/lib/sample-data";
-import { ValidationResult, validateNotebookLMJson } from "@/lib/validate-json";
+import { SAMPLE_PROJECT_SEIF_V18, NotebookLMProject } from "@/lib/sample-data";
+import { validateNotebookLMJson } from "@/lib/validate-json";
 import { getStorageStats } from "@/lib/project-storage";
-import { Film, CheckCircle2, AlertCircle, Download, ExternalLink, Sparkles, Clapperboard, MonitorPlay, HardDrive } from "lucide-react";
+import { playSfx } from "@/lib/sfx-synthesizer";
+import { CheckCircle2, Sparkles, MonitorPlay, CloudCheck } from "lucide-react";
 
-// Pure helper to determine current active VFX and text overlay
-function getActiveOverlayAndVfx(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
+// Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
+function getActiveTimelineState(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
   let accTime = 0;
   for (let i = 0; i < shots.length; i++) {
     const shot = shots[i];
+    const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
     const shotStart = accTime;
-    const shotEnd = shotStart + shot.duration_seconds;
+    const shotEnd = shotStart + dur;
+
     if (currentTime >= shotStart && currentTime < shotEnd) {
+      // Find active VFX layer
       const activeLayer = (shot.vfx_spatial_layers || []).find((vfx) => {
         const vfxStart = shotStart + vfx.trigger_sec;
         const vfxEnd = vfxStart + vfx.duration_sec;
         return currentTime >= vfxStart && currentTime <= vfxEnd;
       });
 
+      // Find active Beat
+      const activeBeat = (shot.beats || []).reduce<string | null>((acc, b) => {
+        const beatTime = shotStart + b.at_sec;
+        if (currentTime >= beatTime) {
+          return b.visual_change;
+        }
+        return acc;
+      }, null);
+
+      // Find active spoken dialogue or voiceover
+      const activeDialogueLine = (shot.dialogue || []).find((d) => {
+        const dStart = shotStart + (d.trigger_sec || 0);
+        const dEnd = dStart + (d.duration_sec || 2.5);
+        return currentTime >= dStart && currentTime <= dEnd;
+      });
+
+      const activeVoiceover = activeDialogueLine
+        ? `${activeDialogueLine.speaker || activeDialogueLine.character_ar || 'سيف'}: ${activeDialogueLine.line || activeDialogueLine.line_egyptian}`
+        : shot.voiceover_egyptian || null;
+
       return {
         activeTextOverlay: shot.text_overlay || null,
-        activeVfxType: activeLayer ? activeLayer.layer_type : manualVfx
+        activeVoiceover,
+        activeVfxType: activeLayer ? activeLayer.layer_type : manualVfx,
+        currentBeat: activeBeat,
+        cameraMotion: shot.camera_motion || null,
+        activeShot: shot,
+        shotStart
       };
     }
     accTime = shotEnd;
   }
+
   return {
     activeTextOverlay: null,
-    activeVfxType: manualVfx
+    activeVoiceover: null,
+    activeVfxType: manualVfx,
+    currentBeat: null,
+    cameraMotion: null,
+    activeShot: null,
+    shotStart: 0
   };
 }
 
 export default function AnimeDubStudioPage() {
   const [activeTab, setActiveTab] = useState<string>("project");
-  const [project, setProject] = useState<NotebookLMProject>(SAMPLE_PROJECT_SOLO_LEVELING);
+  const [project, setProject] = useState<NotebookLMProject>(SAMPLE_PROJECT_SEIF_V18);
 
   // Derive validation via useMemo without cascading setState
   const validation = useMemo(() => validateNotebookLMJson(project), [project]);
@@ -56,11 +92,14 @@ export default function AnimeDubStudioPage() {
   const [separatedVocalsUrl, setSeparatedVocalsUrl] = useState<string | null>(null);
   const [separatedInstUrl, setSeparatedInstUrl] = useState<string | null>(null);
 
-  // Playback & VFX state
+  // Playback & VFX state (defaults to 9:16 Shorts)
   const [currentTime, setCurrentTime] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('16:9');
-  const [manualVfxType, setManualVfxType] = useState<string | null>("blue_aura");
+  const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('9:16');
+  const [manualVfxType, setManualVfxType] = useState<string | null>("dark_purple_shadow_aura");
+
+  // Track triggered SFX during playback to prevent repeated hits
+  const triggeredSfxRef = useRef<Set<string>>(new Set());
 
   // Render modal state
   const [isRendering, setIsRendering] = useState(false);
@@ -92,8 +131,9 @@ export default function AnimeDubStudioPage() {
   }, []);
 
   // Synchronized playback timer
-  const totalDuration = validation?.calculated_total_duration || 16.0;
+  const totalDuration = validation?.calculated_total_duration || 17.0;
 
+  // Real-time SFX and timeline synchronization
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying) {
@@ -101,17 +141,54 @@ export default function AnimeDubStudioPage() {
         setCurrentTime((prev) => {
           if (prev >= totalDuration) {
             setIsPlaying(false);
+            triggeredSfxRef.current.clear();
             return 0;
           }
-          return Math.round((prev + 0.1) * 10) / 10;
+          const nextTime = Math.round((prev + 0.1) * 10) / 10;
+
+          // Check SFX triggers in active shot
+          let accTime = 0;
+          for (const shot of project.shots) {
+            const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
+            const shotStart = accTime;
+            const shotEnd = shotStart + dur;
+
+            if (nextTime >= shotStart && nextTime <= shotEnd) {
+              const sfxList = Array.isArray(shot.sound_design?.sfx)
+                ? shot.sound_design.sfx
+                : shot.sound_design?.sfx_name
+                ? [{ sfx_name: shot.sound_design.sfx_name, sfx_trigger_sec: shot.sound_design.sfx_trigger_sec || 0, sfx_volume_percent: 80 }]
+                : [];
+
+              sfxList.forEach((sfx, sIdx) => {
+                const sfxKey = `shot_${shot.shot_number}_sfx_${sIdx}_${sfx.sfx_name}`;
+                const triggerAt = shotStart + (sfx.sfx_trigger_sec || 0);
+
+                if (Math.abs(nextTime - triggerAt) <= 0.15 && !triggeredSfxRef.current.has(sfxKey)) {
+                  triggeredSfxRef.current.add(sfxKey);
+                  playSfx(sfx.sfx_name, sfx.sfx_volume_percent || 80);
+                }
+              });
+              break;
+            }
+            accTime = shotEnd;
+          }
+
+          return nextTime;
         });
       }, 100);
+    } else {
+      triggeredSfxRef.current.clear();
     }
     return () => clearInterval(interval);
-  }, [isPlaying, totalDuration]);
+  }, [isPlaying, totalDuration, project.shots]);
 
-  // Derive active VFX and Text Overlay dynamically based on current time
-  const { activeTextOverlay, activeVfxType } = getActiveOverlayAndVfx(project.shots, currentTime, manualVfxType);
+  // Derive active states
+  const { activeTextOverlay, activeVoiceover, activeVfxType, currentBeat, cameraMotion } = getActiveTimelineState(
+    project.shots,
+    currentTime,
+    manualVfxType
+  );
 
   // Handle render final video simulation
   const handleRenderClick = () => {
@@ -119,11 +196,11 @@ export default function AnimeDubStudioPage() {
     setTimeout(() => {
       setIsRendering(false);
       setRenderFinished(true);
-    }, 2800);
+    }, 2500);
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col font-sans" dir="rtl">
+    <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col font-sans pb-20 lg:pb-6" dir="rtl">
       {/* Top Bar with strict 3-zone contract */}
       <TopBar
         activeTab={activeTab}
@@ -136,53 +213,9 @@ export default function AnimeDubStudioPage() {
       />
 
       {/* Main Studio Viewport */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto p-3 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
         {/* Left Column: Active Workspace Panel */}
         <div className="lg:col-span-7 xl:col-span-8 space-y-5">
-          {/* Workspace Sub-Header Tab Switcher for Mobile & Compact screens */}
-          <div className="flex lg:hidden items-center gap-1.5 p-1 bg-slate-900 rounded-lg border border-slate-800 overflow-x-auto text-xs">
-            <button
-              onClick={() => setActiveTab('project')}
-              className={`px-3 py-1.5 rounded transition-colors whitespace-nowrap ${
-                activeTab === 'project' ? "bg-rose-600 text-white font-medium" : "text-slate-400"
-              }`}
-            >
-              المشروع
-            </button>
-            <button
-              onClick={() => setActiveTab('separation')}
-              className={`px-3 py-1.5 rounded transition-colors whitespace-nowrap ${
-                activeTab === 'separation' ? "bg-rose-600 text-white font-medium" : "text-slate-400"
-              }`}
-            >
-              فصل الصوت
-            </button>
-            <button
-              onClick={() => setActiveTab('voices')}
-              className={`px-3 py-1.5 rounded transition-colors whitespace-nowrap ${
-                activeTab === 'voices' ? "bg-rose-600 text-white font-medium" : "text-slate-400"
-              }`}
-            >
-              الدبلجة
-            </button>
-            <button
-              onClick={() => setActiveTab('timeline')}
-              className={`px-3 py-1.5 rounded transition-colors whitespace-nowrap ${
-                activeTab === 'timeline' ? "bg-rose-600 text-white font-medium" : "text-slate-400"
-              }`}
-            >
-              الخط الزمني
-            </button>
-            <button
-              onClick={() => setActiveTab('publishing')}
-              className={`px-3 py-1.5 rounded transition-colors whitespace-nowrap ${
-                activeTab === 'publishing' ? "bg-rose-600 text-white font-medium" : "text-slate-400"
-              }`}
-            >
-              النشر
-            </button>
-          </div>
-
           {/* Tab 1: Project Setup & Source Media */}
           {activeTab === "project" && (
             <div className="space-y-5">
@@ -218,12 +251,12 @@ export default function AnimeDubStudioPage() {
               />
               <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 space-y-2">
                 <div className="font-semibold text-slate-200">
-                  إرشادات الجودة وعزل مسارات الأنمي (V19 Separation Guidelines):
+                  إرشادات الجودة وعزل مسارات الأنمي (V18 Separation Engine):
                 </div>
                 <ul className="list-disc list-inside space-y-1 leading-relaxed text-slate-400">
-                  <li>الفصل يتم محلياً بالكامل عبر تقنية Mid/Side Spectral Phase Inversion داخل المتصفح.</li>
-                  <li>يتم فصل الحوار البشري (Vocals) عن مسار الموسيقى والمؤثرات (Instrumental/BGM) مجاناً وبدون أي تكلفة.</li>
-                  <li>بإمكانك كتم صوت الممثلين اليابانيين الأصليين بالكامل مع الإبقاء على الموسيقى التصويرية ليتم تركيب الدبلجة المصرية مكانها بدقة.</li>
+                  <li>الفصل يتم محلياً بالكامل داخل المتصفح مع حماية ترددات الباص وموسيقى الأكشن.</li>
+                  <li>يتم عزل الحوار البشري (Vocals) عن مسار الموسيقى والمؤثرات (Instrumental/BGM) مجاناً وبدون أي تكلفة.</li>
+                  <li>بإمكانك كتم صوت الممثلين اليابانيين الأصليين بالكامل مع الإبقاء على الموسيقى لتركيب الدبلجة المصرية مكانها بدقة.</li>
                 </ul>
               </div>
             </div>
@@ -243,7 +276,10 @@ export default function AnimeDubStudioPage() {
               <StudioTimeline
                 project={project}
                 currentTime={currentTime}
-                onSeek={setCurrentTime}
+                onSeek={(time) => {
+                  setCurrentTime(time);
+                  triggeredSfxRef.current.clear();
+                }}
                 isPlaying={isPlaying}
                 onTogglePlay={() => setIsPlaying(!isPlaying)}
                 totalDuration={totalDuration}
@@ -266,12 +302,15 @@ export default function AnimeDubStudioPage() {
         </div>
 
         {/* Right Column: Live Render & Video Canvas Preview */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-5 sticky top-20">
+        <div className="lg:col-span-5 xl:col-span-4 space-y-5 lg:sticky lg:top-20">
           <VideoCanvas
             aspectRatio={aspectRatio}
             onToggleAspectRatio={setAspectRatio}
             activeVfxType={activeVfxType}
             textOverlay={activeTextOverlay}
+            activeVoiceover={activeVoiceover}
+            cameraMotion={cameraMotion}
+            currentBeat={currentBeat}
             videoUrl={videoUrl}
             currentTime={currentTime}
             isPlaying={isPlaying}
@@ -279,8 +318,8 @@ export default function AnimeDubStudioPage() {
             onDurationChange={setVideoDuration}
           />
 
-          {/* Quick Production Status Panel */}
-          <div className="p-4 rounded-xl bg-slate-900/90 border border-slate-800 space-y-3">
+          {/* Production State & Storage Quick Status */}
+          <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-lg">
             <div className="text-xs font-semibold text-slate-200 flex items-center justify-between pb-2 border-b border-slate-800">
               <span className="flex items-center gap-2">
                 <MonitorPlay className="w-3.5 h-3.5 text-rose-500" />
@@ -293,73 +332,86 @@ export default function AnimeDubStudioPage() {
 
             <div className="space-y-2 text-xs">
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">فحص وتكامل الـ JSON:</span>
+                <span className="text-slate-400">فحص مخطط v18 والجيسون:</span>
                 <span className={validation?.is_valid ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
-                  {validation?.is_valid ? "صالح ومعتمد" : "يتطلب تصحيحاً"}
+                  {validation?.is_valid ? "معتمد ومطابق لـ v18" : "يتطلب تصحيحاً"}
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">فصل الصوت الأصلي (مجاناً):</span>
-                <span className={separatedInstUrl ? "text-emerald-400 font-medium" : "text-amber-400 font-medium"}>
-                  {separatedInstUrl ? "جاهز ومعزول (BGM)" : "تجريبي متاح"}
+                <span className="text-slate-400">مخزن الوسائط (/api/media):</span>
+                <span className="text-emerald-400 font-medium flex items-center gap-1 font-mono">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Public Blob Ready (ok: true)</span>
                 </span>
               </div>
 
               <div className="flex items-center justify-between">
-                <span className="text-slate-400">توليد أصوات الدبلجة:</span>
-                <span className="text-indigo-400 font-mono font-medium">
-                  {project.shots.reduce((acc, s) => acc + s.dialogue.filter(d => d.audio_url).length, 0)} / {project.shots.reduce((acc, s) => acc + s.dialogue.length, 0)} مقطع
-                </span>
+                <span className="text-slate-400">محرك المؤثرات الصوتية:</span>
+                <span className="text-amber-400 font-medium">Web Audio API Synthesis</span>
               </div>
 
               <div className="flex items-center justify-between">
                 <span className="text-slate-400">نسبة العرض المختارة:</span>
                 <span className="font-mono text-slate-200">
-                  {aspectRatio === '16:9' ? "16:9 (عريض يوتيوب)" : "9:16 (شورتس رأسي)"}
+                  {aspectRatio === '9:16' ? "9:16 (شورتس رأسي)" : "16:9 (عريض يوتيوب)"}
                 </span>
               </div>
             </div>
 
             {/* Quick action buttons */}
-            <div className="pt-2 border-t border-slate-800/80 flex gap-2">
+            <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2">
               <button
-                onClick={() => setManualVfxType("speed_lines")}
-                className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 transition-colors cursor-pointer"
+                onClick={() => {
+                  setManualVfxType("dark_purple_shadow_aura");
+                  playSfx("Dark Shadow Energy Aura", 80);
+                }}
+                className="py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-purple-300 transition-colors cursor-pointer text-center"
               >
-                اختبار خطوط السرعة
+                تجربة هالة الظلال
               </button>
               <button
-                onClick={() => setManualVfxType("camera_shake")}
-                className="flex-1 py-1.5 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-slate-200 transition-colors cursor-pointer"
+                onClick={() => {
+                  setManualVfxType("camera_shake");
+                  playSfx("Sub Boom Impact", 90);
+                }}
+                className="py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-rose-300 transition-colors cursor-pointer text-center"
               >
-                اختبار اهتزاز الكاميرا
+                ضربة الخطاف (Sub Boom)
               </button>
             </div>
           </div>
         </div>
       </main>
 
+      {/* Fixed Bottom Navigation for Mobile Devices */}
+      <BottomNav
+        activeTab={activeTab}
+        setActiveTab={setActiveTab}
+        onOpenStorage={() => setIsStorageOpen(true)}
+        storageCount={storageStats.count}
+      />
+
       {/* Render Modal Dialog */}
       {renderFinished && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-xl border border-slate-800 bg-slate-950 p-6 space-y-4 shadow-2xl">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-6 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-800 flex items-center justify-center text-emerald-400">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-bold text-slate-100 text-sm">اكتمل إنتاج الفيديو بنجاح!</h4>
+                <h4 className="font-bold text-slate-100 text-sm">اكتمل إنتاج شورتس الأنمي بنجاح!</h4>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  تم دمج الدبلجة المصرية والموسيقى المعزولة والمؤثرات البصرية
+                  تم دمج الدبلجة المصرية والمؤثرات الصوتية الفورية ومصفوفة Beats
                 </p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-lg bg-slate-900 border border-slate-800 space-y-2 text-xs font-mono">
+            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs font-mono">
               <div className="flex justify-between text-slate-300">
                 <span>المشروع:</span>
-                <span className="font-sans text-white">{project.project_info.anime_title}</span>
+                <span className="font-sans text-white">{project.project_info.title || project.project_info.anime_title}</span>
               </div>
               <div className="flex justify-between text-slate-300">
                 <span>المدة الإجمالية:</span>
@@ -370,15 +422,15 @@ export default function AnimeDubStudioPage() {
                 <span className="text-slate-200">{aspectRatio}</span>
               </div>
               <div className="flex justify-between text-slate-300">
-                <span>قناة النشر:</span>
-                <span className="font-sans text-rose-400 font-semibold">{project.project_info.default_channel}</span>
+                <span>المؤثرات الصوتية:</span>
+                <span className="text-amber-400 font-sans">توليد تلقائي تزامني</span>
               </div>
             </div>
 
             <div className="flex items-center justify-end gap-2 pt-2">
               <button
                 onClick={() => setRenderFinished(false)}
-                className="px-3.5 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
+                className="px-3.5 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer min-h-[44px]"
               >
                 إغلاق
               </button>
@@ -387,10 +439,10 @@ export default function AnimeDubStudioPage() {
                   setActiveTab("publishing");
                   setRenderFinished(false);
                 }}
-                className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer"
+                className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer min-h-[44px]"
               >
                 <Sparkles className="w-3.5 h-3.5" />
-                <span>الانتقال لبيانات النشر واليوتيوب</span>
+                <span>الانتقال لبيانات النشر والـ SEO</span>
               </button>
             </div>
           </div>

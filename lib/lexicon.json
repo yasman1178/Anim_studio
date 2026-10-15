@@ -1,0 +1,66 @@
+{
+  "version": "18.0",
+  "name": "Egyptian Arabic Dubbing Lexicon - سلسلة حكاية سيف",
+  "description": "قاموس مصطلحات الدبلجة المصرية للأنمي والشورتس لقناة محب أنمي",
+  "replacements": {
+    "عرش": "مقعد أثري ضخم",
+    "العرش": "المقعد الأثري الضخم",
+    "إله": "تمثال الصرح الأثري",
+    "الإله": "تمثال الصرح الأثري",
+    "آلهة": "تماثيل حراس الصرح",
+    "معبود": "رمز القوة القديم",
+    "تخيل يا صاحبي": "بص معايا هنا",
+    "يا جدع": "اسمع دي",
+    "يا سيدي": "اللي حصل إن",
+    "سولو ليفلينج": "حكاية سيف",
+    "سونغ جين وو": "سيف",
+    "تشا هاي إن": "سارة",
+    "يو جينهو": "طارق",
+    "غوه غون هي": "كمال"
+  },
+  "forbidden_characters": ["--", "—", "[", "]", "{", "}"],
+  "voice_presets": {
+    "narrator": {
+      "voice": "ar-EG-ShakirNeural",
+      "rate": "+8%",
+      "pitch": "+0Hz",
+      "volume": "+0%",
+      "description": "الراوي والحوار الأساسي"
+    },
+    "tension": {
+      "voice": "ar-EG-ShakirNeural",
+      "rate": "+4%",
+      "pitch": "-6Hz",
+      "volume": "+0%",
+      "description": "غموض وتشويق"
+    },
+    "excited": {
+      "voice": "ar-EG-ShakirNeural",
+      "rate": "+14%",
+      "pitch": "+6Hz",
+      "volume": "+5%",
+      "description": "صدمة وتحدي وحماس"
+    },
+    "sad": {
+      "voice": "ar-EG-ShakirNeural",
+      "rate": "-6%",
+      "pitch": "-4Hz",
+      "volume": "-5%",
+      "description": "صعبانيات وشجن"
+    },
+    "beast": {
+      "voice": "ar-SA-HamedNeural",
+      "rate": "-8%",
+      "pitch": "-18Hz",
+      "volume": "+5%",
+      "description": "الوحوش والعمالقة"
+    },
+    "system": {
+      "voice": "ar-AE-HamdanNeural",
+      "rate": "-5%",
+      "pitch": "-10Hz",
+      "volume": "-3%",
+      "description": "هامس النظام الغامض"
+    }
+  }
+}
