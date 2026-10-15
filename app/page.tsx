@@ -16,7 +16,7 @@ import { SAMPLE_PROJECT_SEIF_V18, NotebookLMProject } from "@/lib/sample-data";
 import { validateNotebookLMJson } from "@/lib/validate-json";
 import { getStorageStats } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
-import { CheckCircle2, Sparkles, MonitorPlay, CloudCheck } from "lucide-react";
+import { CheckCircle2, Sparkles, MonitorPlay } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
 function getActiveTimelineState(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
@@ -200,8 +200,8 @@ export default function AnimeDubStudioPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#0B0F19] text-slate-100 flex flex-col font-sans pb-20 lg:pb-6" dir="rtl">
-      {/* Top Bar with strict 3-zone contract */}
+    <div className="min-h-screen w-full max-w-full overflow-x-hidden bg-[#0B0F19] text-slate-100 flex flex-col font-sans pb-20 lg:pb-6" dir="rtl">
+      {/* Top Bar with strict mobile boundary contract */}
       <TopBar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -213,12 +213,94 @@ export default function AnimeDubStudioPage() {
       />
 
       {/* Main Studio Viewport */}
-      <main className="flex-1 w-full max-w-[1600px] mx-auto p-3 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
-        {/* Left Column: Active Workspace Panel */}
-        <div className="lg:col-span-7 xl:col-span-8 space-y-5">
+      <main className="flex-1 w-full max-w-[1600px] mx-auto p-3 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start overflow-x-hidden">
+        {/* Mobile View: Render VideoCanvas FIRST (order-1 on mobile, order-2 on desktop) */}
+        <div className="order-1 lg:order-2 lg:col-span-5 xl:col-span-4 space-y-4 lg:sticky lg:top-20 w-full max-w-full">
+          <VideoCanvas
+            aspectRatio={aspectRatio}
+            onToggleAspectRatio={setAspectRatio}
+            activeVfxType={activeVfxType}
+            textOverlay={activeTextOverlay}
+            activeVoiceover={activeVoiceover}
+            cameraMotion={cameraMotion}
+            currentBeat={currentBeat}
+            videoUrl={videoUrl}
+            currentTime={currentTime}
+            isPlaying={isPlaying}
+            onTimeUpdate={setCurrentTime}
+            onDurationChange={setVideoDuration}
+          />
+
+          {/* Production State & Storage Quick Status */}
+          <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-lg">
+            <div className="text-xs font-semibold text-slate-200 flex items-center justify-between pb-2 border-b border-slate-800">
+              <span className="flex items-center gap-2">
+                <MonitorPlay className="w-3.5 h-3.5 text-rose-500" />
+                <span>حالة الإنتاج الفوري (Production State)</span>
+              </span>
+              <span className="font-mono tabular-nums text-slate-400">
+                {currentTime.toFixed(1)}s / {totalDuration.toFixed(1)}s
+              </span>
+            </div>
+
+            <div className="space-y-2 text-xs">
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">فحص سيناريو v18:</span>
+                <span className={validation?.is_valid ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
+                  {validation?.is_valid ? "معتمد ومطابق لـ v18" : "يتطلب تصحيحاً"}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">مخزن الوسائط (/api/media):</span>
+                <span className="text-emerald-400 font-medium flex items-center gap-1 font-mono text-[11px]">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                  <span>Public Blob Ready (ok: true)</span>
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">المؤثرات الصوتية:</span>
+                <span className="text-amber-400 font-medium">Web Audio Synthesizer</span>
+              </div>
+
+              <div className="flex items-center justify-between">
+                <span className="text-slate-400">نسبة العرض:</span>
+                <span className="font-mono text-cyan-400">
+                  {aspectRatio === '9:16' ? "9:16 (شورتس رأسي)" : "16:9 (عريض يوتيوب)"}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick action buttons */}
+            <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2">
+              <button
+                onClick={() => {
+                  setManualVfxType("dark_purple_shadow_aura");
+                  playSfx("Dark Shadow Energy Aura", 80);
+                }}
+                className="py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-purple-300 transition-colors cursor-pointer text-center"
+              >
+                تجربة هالة الظلال
+              </button>
+              <button
+                onClick={() => {
+                  setManualVfxType("camera_shake");
+                  playSfx("Sub Boom Impact", 90);
+                }}
+                className="py-2 px-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-rose-300 transition-colors cursor-pointer text-center"
+              >
+                ضربة الخطاف (Sub Boom)
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Mobile View: Workspace Panel SECOND (order-2 on mobile, order-1 on desktop) */}
+        <div className="order-2 lg:order-1 lg:col-span-7 xl:col-span-8 space-y-4 w-full max-w-full">
           {/* Tab 1: Project Setup & Source Media */}
           {activeTab === "project" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               <ProjectSetup
                 project={project}
                 onUpdateProject={setProject}
@@ -240,7 +322,7 @@ export default function AnimeDubStudioPage() {
 
           {/* Tab 2: Free In-Browser Vocal Separation */}
           {activeTab === "separation" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               <VocalSeparator
                 onStemsReady={(vocals, inst) => {
                   setSeparatedVocalsUrl(vocals);
@@ -249,7 +331,7 @@ export default function AnimeDubStudioPage() {
                 originalAudioUrl={videoUrl}
                 onOpenStorageManager={() => setIsStorageOpen(true)}
               />
-              <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 space-y-2">
+              <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 space-y-2">
                 <div className="font-semibold text-slate-200">
                   إرشادات الجودة وعزل مسارات الأنمي (V18 Separation Engine):
                 </div>
@@ -272,7 +354,7 @@ export default function AnimeDubStudioPage() {
 
           {/* Tab 4: Interactive Studio Timeline & VFX */}
           {activeTab === "timeline" && (
-            <div className="space-y-5">
+            <div className="space-y-4">
               <StudioTimeline
                 project={project}
                 currentTime={currentTime}
@@ -300,88 +382,6 @@ export default function AnimeDubStudioPage() {
             />
           )}
         </div>
-
-        {/* Right Column: Live Render & Video Canvas Preview */}
-        <div className="lg:col-span-5 xl:col-span-4 space-y-5 lg:sticky lg:top-20">
-          <VideoCanvas
-            aspectRatio={aspectRatio}
-            onToggleAspectRatio={setAspectRatio}
-            activeVfxType={activeVfxType}
-            textOverlay={activeTextOverlay}
-            activeVoiceover={activeVoiceover}
-            cameraMotion={cameraMotion}
-            currentBeat={currentBeat}
-            videoUrl={videoUrl}
-            currentTime={currentTime}
-            isPlaying={isPlaying}
-            onTimeUpdate={setCurrentTime}
-            onDurationChange={setVideoDuration}
-          />
-
-          {/* Production State & Storage Quick Status */}
-          <div className="p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-lg">
-            <div className="text-xs font-semibold text-slate-200 flex items-center justify-between pb-2 border-b border-slate-800">
-              <span className="flex items-center gap-2">
-                <MonitorPlay className="w-3.5 h-3.5 text-rose-500" />
-                <span>حالة الإنتاج الفوري (Production State)</span>
-              </span>
-              <span className="font-mono tabular-nums text-slate-400">
-                {currentTime.toFixed(1)}s / {totalDuration.toFixed(1)}s
-              </span>
-            </div>
-
-            <div className="space-y-2 text-xs">
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">فحص مخطط v18 والجيسون:</span>
-                <span className={validation?.is_valid ? "text-emerald-400 font-medium" : "text-rose-400 font-medium"}>
-                  {validation?.is_valid ? "معتمد ومطابق لـ v18" : "يتطلب تصحيحاً"}
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">مخزن الوسائط (/api/media):</span>
-                <span className="text-emerald-400 font-medium flex items-center gap-1 font-mono">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
-                  <span>Public Blob Ready (ok: true)</span>
-                </span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">محرك المؤثرات الصوتية:</span>
-                <span className="text-amber-400 font-medium">Web Audio API Synthesis</span>
-              </div>
-
-              <div className="flex items-center justify-between">
-                <span className="text-slate-400">نسبة العرض المختارة:</span>
-                <span className="font-mono text-slate-200">
-                  {aspectRatio === '9:16' ? "9:16 (شورتس رأسي)" : "16:9 (عريض يوتيوب)"}
-                </span>
-              </div>
-            </div>
-
-            {/* Quick action buttons */}
-            <div className="pt-2 border-t border-slate-800/80 grid grid-cols-2 gap-2">
-              <button
-                onClick={() => {
-                  setManualVfxType("dark_purple_shadow_aura");
-                  playSfx("Dark Shadow Energy Aura", 80);
-                }}
-                className="py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-purple-300 transition-colors cursor-pointer text-center"
-              >
-                تجربة هالة الظلال
-              </button>
-              <button
-                onClick={() => {
-                  setManualVfxType("camera_shake");
-                  playSfx("Sub Boom Impact", 90);
-                }}
-                className="py-2 px-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-medium text-rose-300 transition-colors cursor-pointer text-center"
-              >
-                ضربة الخطاف (Sub Boom)
-              </button>
-            </div>
-          </div>
-        </div>
       </main>
 
       {/* Fixed Bottom Navigation for Mobile Devices */}
@@ -394,8 +394,8 @@ export default function AnimeDubStudioPage() {
 
       {/* Render Modal Dialog */}
       {renderFinished && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-6 space-y-4 shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-800 flex items-center justify-center text-emerald-400">
                 <CheckCircle2 className="w-5 h-5" />

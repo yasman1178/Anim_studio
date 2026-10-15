@@ -249,36 +249,36 @@ export default function StorageManager({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-2 sm:p-4 bg-black/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div 
-        className="relative w-full max-w-4xl max-h-[90vh] flex flex-col bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden"
+        className="relative w-full max-w-lg sm:max-w-4xl max-h-[90vh] flex flex-col bg-slate-900 border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden"
         dir="rtl"
       >
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-slate-950/70">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-rose-500/20 to-blue-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400">
-              <HardDrive className="w-5 h-5" />
+        <div className="flex items-center justify-between px-3 sm:px-6 py-3 sm:py-4 border-b border-slate-800 bg-slate-950/70">
+          <div className="flex items-center gap-2 sm:gap-3">
+            <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-rose-500/20 to-blue-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400 shrink-0">
+              <HardDrive className="w-4 h-4 sm:w-5 sm:h-5" />
             </div>
             <div>
-              <div className="flex items-center gap-2">
-                <h2 className="text-base font-bold text-white">ذاكرة الموقع وإدارة الملفات المحلية</h2>
-                <span className="text-[11px] px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 font-mono">
-                  <ShieldCheck className="w-3 h-3" /> IndexedDB فوري
+              <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+                <h2 className="text-sm sm:text-base font-bold text-white">ذاكرة الموقع وإدارة الملفات</h2>
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1 font-mono">
+                  <ShieldCheck className="w-3 h-3" /> IndexedDB
                 </span>
               </div>
-              <p className="text-xs text-slate-400 mt-0.5">
-                تخزين كامل ملفات الفيديو ومسارات الصوت محلياً على جهازك دون قيود وبدون استهلاك إنترنت
+              <p className="text-[11px] text-slate-400 mt-0.5 line-clamp-1">
+                تخزين كامل ملفات الفيديو ومسارات الصوت محلياً على جهازك
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2 shrink-0">
             <button
               onClick={refreshStorage}
               disabled={loading}
               title="تحديث القائمة"
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
             >
               <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
             </button>
@@ -287,7 +287,7 @@ export default function StorageManager({
                 stopPreview();
                 onClose();
               }}
-              className="p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
+              className="p-1.5 sm:p-2 text-slate-400 hover:text-white rounded-lg hover:bg-slate-800 transition"
             >
               <X className="w-5 h-5" />
             </button>
@@ -296,23 +296,23 @@ export default function StorageManager({
 
         {/* Action Notice */}
         {actionNotice && (
-          <div className="px-6 py-2.5 bg-rose-500/10 border-b border-rose-500/20 text-rose-300 text-xs flex items-center gap-2 animate-in fade-in">
+          <div className="px-3 sm:px-6 py-2 bg-rose-500/10 border-b border-rose-500/20 text-rose-300 text-xs flex items-center gap-2 animate-in fade-in">
             <CheckCircle className="w-4 h-4 text-rose-400 shrink-0" />
             <span>{actionNotice}</span>
           </div>
         )}
 
         {/* Storage Stats Bar */}
-        <div className="px-6 py-3 bg-slate-950/40 border-b border-slate-800 flex flex-wrap items-center justify-between gap-4">
-          <div className="flex items-center gap-4 text-xs">
+        <div className="px-3 sm:px-6 py-2.5 sm:py-3 bg-slate-950/40 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2 sm:gap-4">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-4 text-xs">
             <div>
-              <span className="text-slate-400">المساحة المستخدمة: </span>
-              <span className="font-mono font-bold text-white text-sm">{formatBytes(stats.totalBytes)}</span>
+              <span className="text-slate-400">المساحة: </span>
+              <span className="font-mono font-bold text-white text-xs sm:text-sm">{formatBytes(stats.totalBytes)}</span>
             </div>
             <span className="text-slate-600">·</span>
             <div>
-              <span className="text-slate-400">عدد الملفات: </span>
-              <span className="font-mono font-bold text-cyan-400">{stats.count} ملفات</span>
+              <span className="text-slate-400">الملفات: </span>
+              <span className="font-mono font-bold text-cyan-400">{stats.count}</span>
             </div>
             {stats.quotaBytes && (
               <>

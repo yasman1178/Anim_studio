@@ -3,12 +3,12 @@
 import React, { useState } from "react";
 import {
   NotebookLMProject,
+  SAMPLE_PROJECT_SEIF_V18,
   SAMPLE_PROJECT_SOLO_LEVELING,
   SAMPLE_PROJECT_JUJUTSU,
-  SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3
 } from "@/lib/sample-data";
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, AlertTriangle, RefreshCw, Sparkles, Code2, HardDrive, ShieldCheck } from "lucide-react";
+import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck } from "lucide-react";
 import { saveMediaAsset } from "@/lib/project-storage";
 
 interface ProjectSetupProps {
@@ -144,62 +144,58 @@ export function ProjectSetup({
       setRawJsonText(JSON.stringify(normalized, null, 2));
       setJsonError(null);
       setShowJsonEditor(false);
-    } catch (err) {
+    } catch {
       setJsonError("صيغة الـ JSON غير صحيحة، تأكد من الأقواس والفواصل.");
     }
   };
 
   return (
-    <div className="rounded-xl border border-slate-800 bg-slate-900/90 p-5 space-y-5">
-      {/* Header & Quick Sample Preset Selectors */}
-      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
-        <div>
-          <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
-            <Film className="w-4 h-4 text-rose-500" />
-            <span>إعداد المشروع والوسائط (Project & Source Input)</span>
-          </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            التحقق من رابط الفيديو، ورفع ملف الفيديو المحلي، وتدقيق ملف NotebookLM JSON للدبلجة المصرية
-          </p>
-        </div>
+    <div className="w-full max-w-full rounded-2xl border border-slate-800 bg-slate-900/90 p-4 sm:p-5 space-y-4 shadow-xl">
+      {/* Header */}
+      <div className="space-y-1 pb-3 border-b border-slate-800">
+        <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
+          <Film className="w-4 h-4 text-rose-500" />
+          <span>إعداد المشروع والوسائط (Project & Media)</span>
+        </h3>
+        <p className="text-xs text-slate-400">
+          حدد مصدر الفيديو أو ارفع ملفك، واختر سيناريو الدبلجة v18 المعتمد لقناة «محب أنمي»
+        </p>
+      </div>
 
-        {/* 1-Click Sample Loaders & Storage Manager */}
-        <div className="flex flex-wrap items-center gap-2">
-          {onOpenStorageManager && (
-            <button
-              type="button"
-              onClick={onOpenStorageManager}
-              className="px-3 py-1 text-xs font-semibold text-rose-300 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/60 rounded-md transition-colors cursor-pointer flex items-center gap-1.5"
-            >
-              <HardDrive className="w-3.5 h-3.5 text-rose-400" />
-              <span>ذاكرة الموقع وإدارة الملفات</span>
-            </button>
-          )}
-          <span className="text-xs text-slate-400">نماذج جاهزة:</span>
+      {/* Preset Project Loaders - Responsive Grid */}
+      <div className="space-y-2">
+        <div className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+          <Sparkles className="w-3.5 h-3.5 text-rose-400" />
+          <span>اختر مشروعاً جاهزاً للبدء الفوري:</span>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
           <button
-            onClick={() => loadPreset(SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3)}
-            className="px-2.5 py-1 text-xs font-semibold text-rose-300 bg-rose-950/50 hover:bg-rose-900/50 border border-rose-800/80 rounded-md transition-colors cursor-pointer"
+            onClick={() => loadPreset(SAMPLE_PROJECT_SEIF_V18)}
+            className="p-3 rounded-xl text-right bg-rose-950/40 border border-rose-500/50 hover:border-rose-400 text-rose-100 transition-colors cursor-pointer"
           >
-            ★ سولو ليفلينج الموسم 3 (3 دقائق)
+            <div className="font-semibold text-rose-200">★ حكاية سيف (الحلقة 4)</div>
+            <div className="text-[11px] text-rose-300/80 mt-0.5 font-mono">Shorts 9:16 · إيقاع Beats</div>
           </button>
           <button
             onClick={() => loadPreset(SAMPLE_PROJECT_SOLO_LEVELING)}
-            className="px-2.5 py-1 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors cursor-pointer"
+            className="p-3 rounded-xl text-right bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 transition-colors cursor-pointer"
           >
-            سولو ليفلينج (3 لقطات)
+            <div className="font-semibold text-slate-100">سولو ليفلينج (3 لقطات)</div>
+            <div className="text-[11px] text-slate-400 mt-0.5 font-mono">16 ثانية · دبلجة مصرية</div>
           </button>
           <button
             onClick={() => loadPreset(SAMPLE_PROJECT_JUJUTSU)}
-            className="px-2.5 py-1 text-xs font-medium text-slate-200 bg-slate-800 hover:bg-slate-700 rounded-md transition-colors cursor-pointer"
+            className="p-3 rounded-xl text-right bg-slate-900 border border-slate-800 hover:border-slate-700 text-slate-200 transition-colors cursor-pointer"
           >
-            جوجوتسو كايسن (لقطتان)
+            <div className="font-semibold text-slate-100">جوجوتسو كايسن (قتال)</div>
+            <div className="text-[11px] text-slate-400 mt-0.5 font-mono">غوجو وسوكونا · لقطتان</div>
           </button>
         </div>
       </div>
 
       {/* Local Storage Notice Banner */}
       {storageNotice && (
-        <div className="p-3 bg-emerald-950/60 border border-emerald-600/50 rounded-lg text-emerald-200 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+        <div className="p-3 bg-emerald-950/60 border border-emerald-600/50 rounded-xl text-emerald-200 text-xs flex items-center justify-between gap-3 animate-in fade-in">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
             <span>{storageNotice}</span>
@@ -208,9 +204,9 @@ export function ProjectSetup({
             <button
               type="button"
               onClick={onOpenStorageManager}
-              className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded transition shrink-0 cursor-pointer"
+              className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg transition shrink-0 cursor-pointer"
             >
-              عرض ديلوج الذاكرة
+              عرض الذاكرة
             </button>
           )}
         </div>
@@ -218,32 +214,32 @@ export function ProjectSetup({
 
       {/* Main Grid: Video Reference & JSON Upload */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {/* Box 1: Video Reference & Local File Upload (Spec V19 Principle 2) */}
-        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+        {/* Box 1: Video Reference & Local File Upload */}
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
               <LinkIcon className="w-3.5 h-3.5 text-sky-400" />
-              <span>مصدر الفيديو ورابط المرجع</span>
+              <span>مصدر الفيديو والمرجع</span>
             </span>
-            <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
-              {videoUrl ? "Media available" : urlStatus === 'received' ? "URL received" : "Needs local upload"}
+            <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-900 border border-slate-800 text-slate-400">
+              {videoUrl ? "فيديو جاهز" : "يتطلب تحديد فيديو"}
             </span>
           </div>
 
           <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <label className="text-[11px] text-slate-400">رابط الفيديو المرجعي (YouTube / Direct MP4):</label>
+            <div className="flex items-center justify-between text-[11px]">
+              <label className="text-slate-400">رابط الفيديو (YouTube أو MP4 مباشر):</label>
               {sourceUrl && (
                 <button
                   type="button"
                   onClick={handleClearUrl}
-                  className="text-[10px] text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
+                  className="text-rose-400 hover:text-rose-300 transition-colors cursor-pointer"
                 >
-                  مسح الرابط
+                  مسح
                 </button>
               )}
             </div>
-            <div className="flex gap-2">
+            <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="text"
                 value={sourceUrl}
@@ -257,37 +253,37 @@ export function ProjectSetup({
                     handleLoadVideoUrl();
                   }
                 }}
-                placeholder="ضع رابط فيديو يوتيوب أو MP4 هنا..."
-                className="flex-1 px-3 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded text-slate-100 focus:outline-none focus:border-rose-500 font-mono"
+                placeholder="رابط يوتيوب أو MP4..."
+                className="w-full flex-1 px-3 py-2 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-rose-500 font-sans"
               />
               <button
                 type="button"
                 onClick={handleLoadVideoUrl}
                 disabled={!sourceUrl.trim()}
-                className="px-3 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed rounded transition-colors cursor-pointer flex items-center gap-1.5 shrink-0"
+                className="w-full sm:w-auto px-3.5 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer flex items-center justify-center gap-1.5 shrink-0"
               >
-                <span>تحميل ومعاينة الفيديو</span>
+                <span>تحميل</span>
               </button>
             </div>
             {videoUrl && (
               <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 pt-0.5">
-                <CheckCircle2 className="w-3.5 h-3.5" />
-                <span>تم تحميل الفيديو وعرضه بنجاح في شاشة المعاينة (Canvas)!</span>
+                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                <span>تم ربط الفيديو بنجاح في شاشة المعاينة!</span>
               </div>
             )}
           </div>
 
-          {/* Local Upload file as preferred by V19 */}
+          {/* Local Upload file */}
           <div className="space-y-1.5 pt-2 border-t border-slate-900">
             <div className="flex items-center justify-between text-[11px]">
-              <span className="text-slate-300 font-medium">رفع ملف الفيديو المحلي (المسار المفضل):</span>
+              <span className="text-slate-300 font-medium">أو ارفع ملف فيديو محلي (MP4/WebM):</span>
               {videoDuration && (
                 <span className="text-emerald-400 font-mono tabular-nums">{Math.round(videoDuration)}s</span>
               )}
             </div>
-            <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-700 hover:border-rose-500 rounded-lg bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-300 cursor-pointer transition-colors">
+            <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-700 hover:border-rose-500 rounded-xl bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-300 cursor-pointer transition-colors min-h-[44px]">
               <Upload className="w-3.5 h-3.5 text-rose-500" />
-              <span>{videoUrl ? "تغيير ملف الفيديو المرفوع" : "اختيار ملف MP4 أو WebM محلي"}</span>
+              <span>{videoUrl ? "تغيير ملف الفيديو المرفوع" : "اختيار ملف فيديو من جهازك"}</span>
               <input
                 type="file"
                 accept="video/mp4,video/webm"
@@ -295,55 +291,43 @@ export function ProjectSetup({
                 className="hidden"
               />
             </label>
-            {onOpenStorageManager && (
-              <button
-                type="button"
-                onClick={onOpenStorageManager}
-                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 border border-slate-800 hover:border-slate-700 rounded-lg bg-slate-950/70 hover:bg-slate-900 text-[11px] text-slate-300 transition-colors cursor-pointer"
-              >
-                <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
-                <span>اختيار من الفيديوهات المحفوظة في ذاكرة الموقع</span>
-              </button>
-            )}
-            <p className="text-[10px] text-slate-500 leading-relaxed">
-              وفقاً لمواصفات V19: يتم حفظ كامل ملف الفيديو المرفوع محلياً في ذاكرة المتصفح (IndexedDB) للعمل عليه دون إعادة الرفع.
-            </p>
           </div>
         </div>
 
         {/* Box 2: NotebookLM JSON Specification Upload */}
-        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-3">
-          <div className="flex items-center justify-between">
-            <span className="text-xs font-semibold text-slate-200 flex items-center gap-1.5">
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
               <FileJson className="w-3.5 h-3.5 text-amber-400" />
-              <span>ملف مواصفات الدبلجة (NotebookLM JSON)</span>
+              <span>ملف سيناريو الجيسون (v18 JSON)</span>
             </span>
             <button
               onClick={() => setShowJsonEditor(true)}
-              className="text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer"
+              className="text-[11px] text-amber-400 hover:text-amber-300 flex items-center gap-1 cursor-pointer"
             >
               <Code2 className="w-3 h-3" />
-              <span>تعديل كود الـ JSON</span>
+              <span>تعديل الكود</span>
             </button>
           </div>
 
           <div className="space-y-1">
-            <label className="text-[11px] text-slate-400">اسم المشروع الحركي:</label>
+            <label className="text-[11px] text-slate-400">عنوان المشروع الحركي:</label>
             <input
               type="text"
-              value={project.project_info.project_name}
+              value={project.project_info.title || project.project_info.project_name || ""}
               onChange={(e) => {
                 const updated = { ...project };
+                updated.project_info.title = e.target.value;
                 updated.project_info.project_name = e.target.value;
                 onUpdateProject(updated);
               }}
-              className="w-full px-3 py-1.5 text-xs bg-slate-900 border border-slate-800 rounded text-slate-100 focus:outline-none focus:border-rose-500 font-sans"
+              className="w-full px-3 py-2 text-xs bg-slate-900 border border-slate-800 rounded-lg text-slate-100 focus:outline-none focus:border-rose-500 font-sans"
             />
           </div>
 
           <div className="space-y-1.5 pt-2 border-t border-slate-900">
-            <div className="text-[11px] text-slate-300 font-medium">رفع ملف JSON جديد من NotebookLM:</div>
-            <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-700 hover:border-amber-500 rounded-lg bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-300 cursor-pointer transition-colors">
+            <div className="text-[11px] text-slate-300 font-medium">استيراد ملف سيناريو جديد (.json):</div>
+            <label className="flex items-center justify-center gap-2 px-3 py-2 border border-dashed border-slate-700 hover:border-amber-500 rounded-xl bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-300 cursor-pointer transition-colors min-h-[44px]">
               <Upload className="w-3.5 h-3.5 text-amber-500" />
               <span>رفع ملف JSON</span>
               <input
@@ -360,53 +344,47 @@ export function ProjectSetup({
         </div>
       </div>
 
-      {/* Project KPI & Spec Summary (Clean unboxed text, no pill clutter) */}
-      <div className="p-3.5 rounded-lg bg-slate-950 border border-slate-800">
-        <div className="text-xs font-semibold text-slate-300 mb-2">ملخص بيانات الإنتاج (Project Manifest):</div>
-        <div className="flex flex-wrap items-center gap-y-2 gap-x-4 text-xs font-mono tabular-nums text-slate-400">
-          <div>الأنمي: <span className="text-slate-200 font-sans">{project.project_info.anime_title}</span></div>
+      {/* Project Manifest Summary */}
+      <div className="p-3.5 rounded-xl bg-slate-950/60 border border-slate-800">
+        <div className="text-xs font-semibold text-slate-300 mb-1.5">بيانات الإنتاج الحالية (Manifest):</div>
+        <div className="flex flex-wrap items-center gap-y-1.5 gap-x-3 text-xs font-mono tabular-nums text-slate-400">
+          <div>العمل: <span className="text-slate-200 font-sans">{project.project_info.title || project.project_info.anime_title}</span></div>
           <span aria-hidden="true" className="text-slate-600">·</span>
-          <div>الحلقة: <span className="text-slate-200">#{project.project_info.episode}</span></div>
+          <div>الحلقة: <span className="text-slate-200">#{project.project_info.episode || 1}</span></div>
           <span aria-hidden="true" className="text-slate-600">·</span>
           <div>القناة: <span className="text-rose-400 font-sans font-semibold">{project.project_info.default_channel}</span></div>
           <span aria-hidden="true" className="text-slate-600">·</span>
-          <div>اللهجة: <span className="text-slate-200 font-sans">{project.project_info.target_language}</span></div>
+          <div>النسبة: <span className="text-cyan-400">{project.project_info.aspect_ratio || '9:16'}</span></div>
           <span aria-hidden="true" className="text-slate-600">·</span>
-          <div>نسبة العرض: <span className="text-slate-200">{project.project_info.aspect_ratio}</span></div>
-          <span aria-hidden="true" className="text-slate-600">·</span>
-          <div>إجمالي اللقطات: <span className="text-slate-200">{project.shots.length}</span></div>
+          <div>اللقطات: <span className="text-slate-200">{project.shots.length}</span></div>
         </div>
       </div>
 
-      {/* JSON Editor Modal / Drawer */}
+      {/* JSON Editor Modal */}
       {showJsonEditor && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-2xl max-h-[85vh] rounded-xl border border-slate-800 bg-slate-950 p-5 space-y-4 flex flex-col shadow-2xl">
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-2xl max-h-[85vh] rounded-2xl border border-slate-800 bg-slate-950 p-4 sm:p-5 space-y-4 flex flex-col shadow-2xl">
             <div className="flex items-center justify-between pb-3 border-b border-slate-800">
               <div className="text-sm font-semibold text-slate-100 flex items-center gap-2">
                 <Code2 className="w-4 h-4 text-amber-500" />
-                <span>محرر كود NotebookLM JSON المباشر</span>
+                <span>محرر كود السيناريو JSON المباشر</span>
               </div>
               <button
                 onClick={() => setShowJsonEditor(false)}
-                className="text-slate-400 hover:text-slate-200 text-xs cursor-pointer"
+                className="text-slate-400 hover:text-slate-200 text-xs cursor-pointer p-1"
               >
                 إغلاق
               </button>
             </div>
 
-            <p className="text-xs text-slate-400 leading-relaxed">
-              وفقاً لقواعد V19: لا يتم تعديل بنية الـ JSON بصمت. يمكنك تعديل الحوارات، اللقطات، أو التوقيتات يدوياً هنا ثم تطبيق التغييرات.
-            </p>
-
             <textarea
               value={rawJsonText}
               onChange={(e) => setRawJsonText(e.target.value)}
-              className="flex-1 min-h-[300px] w-full p-3 bg-slate-900 border border-slate-800 rounded-lg text-slate-200 font-mono text-xs focus:outline-none focus:border-rose-500 leading-normal"
+              className="flex-1 min-h-[300px] w-full p-3 bg-slate-900 border border-slate-800 rounded-xl text-slate-200 font-mono text-xs focus:outline-none focus:border-rose-500 leading-normal"
             />
 
             {jsonError && (
-              <div className="text-xs text-rose-400 p-2 rounded bg-rose-950/30 border border-rose-900">
+              <div className="text-xs text-rose-400 p-2 rounded-lg bg-rose-950/30 border border-rose-900">
                 {jsonError}
               </div>
             )}
@@ -414,15 +392,15 @@ export function ProjectSetup({
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
               <button
                 onClick={() => setShowJsonEditor(false)}
-                className="px-3 py-1.5 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer"
+                className="px-3.5 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer min-h-[40px]"
               >
                 إلغاء
               </button>
               <button
                 onClick={applyJsonEdits}
-                className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer"
+                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer min-h-[40px]"
               >
-                حفظ وتحديث المشروع
+                حفظ وتطبيق
               </button>
             </div>
           </div>
