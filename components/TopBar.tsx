@@ -58,8 +58,18 @@ export function TopBar({
         })}
       </nav>
 
-      {/* Zone 3: 1 primary action */}
-      <div className="flex items-center gap-3 shrink-0">
+      {/* Zone 3: Actions */}
+      <div className="flex items-center gap-2.5 shrink-0">
+        <a
+          href="/Anim_dut_project.zip"
+          download="Anim_dut_project.zip"
+          className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-slate-300 bg-slate-900 hover:bg-slate-800 border border-slate-800 hover:border-slate-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer"
+          title="تحميل كود المشروع بالكامل كملف ZIP"
+        >
+          <Download className="w-3.5 h-3.5 text-rose-400" />
+          <span>تحميل المشروع (ZIP)</span>
+        </a>
+
         <button
           onClick={onRenderClick}
           disabled={isRendering || totalShots === 0}
