@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { separateAudioInBrowser, SeparationResult } from "@/lib/audio-separation";
-import { Play, Pause, RotateCcw, Volume2, VolumeX, CheckCircle, Sliders, Waves, Sparkles, AlertCircle } from "lucide-react";
+import { Play, Pause, RotateCcw, Volume2, VolumeX, CheckCircle, Sliders, Waves, Sparkles, AlertCircle, Upload, Film, FileAudio } from "lucide-react";
 
 interface VocalSeparatorProps {
   onStemsReady: (vocalsUrl: string, instrumentalUrl: string) => void;
@@ -18,6 +18,7 @@ export function VocalSeparator({
   const [progressStep, setProgressStep] = useState("");
   const [separationResult, setSeparationResult] = useState<SeparationResult | null>(null);
   const [isVerified, setIsVerified] = useState(false);
+  const [selectedFileName, setSelectedFileName] = useState<string | null>(null);
 
   // Playback & Mixer state
   const [isPlaying, setIsPlaying] = useState(false);
@@ -32,50 +33,50 @@ export function VocalSeparator({
   const instAudioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Pre-load synthesized demo audio buffer for immediate 1-click test
-  const createDemoAudioBuffer = async (): Promise<Blob> => {
-    const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    const duration = 6.0;
-    const sampleRate = audioCtx.sampleRate;
-    const buffer = audioCtx.createBuffer(2, sampleRate * duration, sampleRate);
-    const left = buffer.getChannelData(0);
-    const right = buffer.getChannelData(1);
-
-    for (let i = 0; i < buffer.length; i++) {
-      const t = i / sampleRate;
-      // Speech simulated center channel (dialogue)
-      const speechCenter = Math.sin(2 * Math.PI * 340 * t) * Math.sin(t * 8) * 0.4;
-      // Music chords stereo wide (left and right out of phase)
-      const musicLeft = (Math.sin(2 * Math.PI * 130 * t) + Math.sin(2 * Math.PI * 260 * t)) * 0.3;
-      const musicRight = (Math.sin(2 * Math.PI * 164 * t) + Math.sin(2 * Math.PI * 328 * t)) * 0.3;
-      // Drum beat
-      const kick = Math.sin(2 * Math.PI * 55 * Math.exp(-((t % 0.5) * 20))) * Math.exp(-((t % 0.5) * 15)) * 0.5;
-
-      left[i] = speechCenter + musicLeft + kick;
-      right[i] = speechCenter + musicRight + kick;
-    }
-
-    const { bufferToWave } = await import("@/lib/audio-separation");
-    return bufferToWave(buffer);
+  // Handle local video/audio file selection for separation
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setSelectedFileName(file.name);
+    await runSeparationWithBlob(file);
   };
 
-  const runSeparation = async (inputBlob?: Blob) => {
+  // Separate directly from the project's uploaded video
+  const separateUploadedVideo = async () => {
+    if (!originalAudioUrl) return;
+    setSelectedFileName("فيديو المشروع المرفوع");
     setIsProcessing(true);
-    setProgress(5);
-    setProgressStep("بدء تهيئة محرك فصل الصوت المجاني...");
+    setProgress(10);
+    setProgressStep("استخراج المسار الصوتي الحقيقي من ملف الفيديو...");
 
     try {
-      const blob = inputBlob || (await createDemoAudioBuffer());
+      const response = await fetch(originalAudioUrl);
+      const blob = await response.blob();
+      await runSeparationWithBlob(blob);
+    } catch (err) {
+      console.error("Error reading video audio:", err);
+      alert("تعذر قراءة صوت الفيديو: " + String(err));
+      setIsProcessing(false);
+    }
+  };
+
+  const runSeparationWithBlob = async (blob: Blob) => {
+    setIsProcessing(true);
+    setProgress(15);
+    setProgressStep("تحليل القنوات الصوتية وتفكيك الإشارة...");
+
+    try {
       const result = await separateAudioInBrowser(blob, (pct, step) => {
         setProgress(pct);
         setProgressStep(step);
       });
 
       setSeparationResult(result);
+      setIsVerified(false);
       onStemsReady(result.vocalsAudioUrl, result.instrumentalAudioUrl);
     } catch (err) {
       console.error("Separation error:", err);
-      alert("تعذر استكمال الفصل التلقائي: " + String(err));
+      alert("حدث خطأ أثناء فصل ملف الصوت: " + String(err));
     } finally {
       setIsProcessing(false);
     }
@@ -103,7 +104,6 @@ export function VocalSeparator({
 
   const handleAbSwitch = (mode: 'original' | 'instrumental' | 'vocals') => {
     setAbMode(mode);
-    // Pause all then play active if was playing
     const wasPlaying = isPlaying;
     originalAudioRef.current?.pause();
     vocalsAudioRef.current?.pause();
@@ -170,10 +170,10 @@ export function VocalSeparator({
         <div>
           <h3 className="text-base font-semibold text-slate-100 flex items-center gap-2">
             <Waves className="w-4 h-4 text-rose-500" />
-            <span>محرك فصل الصوت عن الموسيقى (مجاني 100% داخل المتصفح)</span>
+            <span>محرك فصل الصوت الحقيقي عن الموسيقى (مجاني داخل المتصفح)</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            يعمل عبر Web Audio API مباشرة على جهازك دون أي تكلفة أو اشتراكات أو خوادم خارجية
+            يقوم بفصل الصوت الحقيقي للملف إلى مسار الحوار (Vocals) ومسار الموسيقى (BGM) بدون أصوات مصطنعة
           </p>
         </div>
 
@@ -197,16 +197,58 @@ export function VocalSeparator({
               </button>
             )}
           </div>
-        ) : (
+        ) : null}
+      </div>
+
+      {/* File Source Selector Box */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        {/* Option 1: From Video in Tab 1 */}
+        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+              <Film className="w-3.5 h-3.5 text-sky-400" />
+              <span>فصل صوت الفيديو المرفوع في المشروع</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+              {originalAudioUrl
+                ? "يوجد ملف فيديو محلي مرفوع بالفعل في المشروع، يمكنك استخراج وفصل صوته الحقيقي الآن."
+                : "لم يتم رفع فيديو محلي في شاشة المشروع بعد."}
+            </p>
+          </div>
+
           <button
-            onClick={() => runSeparation()}
-            disabled={isProcessing}
-            className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 disabled:opacity-50 rounded-lg transition-colors cursor-pointer"
+            onClick={separateUploadedVideo}
+            disabled={!originalAudioUrl || isProcessing}
+            className="flex items-center justify-center gap-2 w-full py-2 px-3 text-xs font-semibold text-white bg-sky-600 hover:bg-sky-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg transition-colors cursor-pointer"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>تشغيل فصل الصوت الآن (مجاناً)</span>
+            <Waves className="w-3.5 h-3.5" />
+            <span>فصل صوت فيديو المشروع الآن</span>
           </button>
-        )}
+        </div>
+
+        {/* Option 2: Upload direct file here */}
+        <div className="p-4 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2.5 flex flex-col justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-200">
+              <FileAudio className="w-3.5 h-3.5 text-rose-400" />
+              <span>رفع أي ملف فيديو أو صوت مستقل للفصل</span>
+            </div>
+            <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">
+              ارفع ملف أنمي (MP4, WebM, MP3, WAV) لمعالجة صوته الحقيقي وفصل الموسيقى عن كلام الممثلين.
+            </p>
+          </div>
+
+          <label className="flex items-center justify-center gap-2 w-full py-2 px-3 border border-dashed border-slate-700 hover:border-rose-500 rounded-lg bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-200 cursor-pointer transition-colors">
+            <Upload className="w-3.5 h-3.5 text-rose-500" />
+            <span>{selectedFileName ? `الملف: ${selectedFileName}` : "اختيار ملف صوت أو فيديو محلي"}</span>
+            <input
+              type="file"
+              accept="audio/*,video/*"
+              onChange={handleFileUpload}
+              className="hidden"
+            />
+          </label>
+        </div>
       </div>
 
       {/* Progress state */}
@@ -239,11 +281,11 @@ export function VocalSeparator({
                   {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 ml-0.5" />}
                 </button>
                 <div className="text-xs text-slate-300 font-mono tabular-nums">
-                  المدة المعالجة: {separationResult.duration} ثانية · {separationResult.sampleRate} Hz
+                  المدة المعالجة: {separationResult.duration}s · معدل العينات: {separationResult.sampleRate} Hz
                 </div>
               </div>
 
-              {/* A/B Switcher (Segmented Control - functional buttons) */}
+              {/* A/B Switcher */}
               <div className="flex items-center gap-1 p-1 bg-slate-900 rounded-lg border border-slate-800 text-xs">
                 <button
                   onClick={() => handleAbSwitch('original')}
@@ -289,7 +331,7 @@ export function VocalSeparator({
             </div>
           </div>
 
-          {/* Stem Mixer (V19 Specs: Mute original, Ducking, Keep BGM) */}
+          {/* Stem Mixer */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {/* Stem 1: Original Vocals control */}
             <div className="p-3.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2.5">
@@ -357,7 +399,7 @@ export function VocalSeparator({
             </div>
           </div>
 
-          {/* Hidden audio elements for actual playback */}
+          {/* Hidden audio elements */}
           {separationResult.instrumentalAudioUrl && (
             <audio
               ref={instAudioRef}
@@ -379,19 +421,6 @@ export function VocalSeparator({
               onEnded={() => setIsPlaying(false)}
             />
           )}
-        </div>
-      )}
-
-      {/* Zero state / call to action if not separated yet */}
-      {!separationResult && !isProcessing && (
-        <div className="p-4 rounded-lg bg-slate-950/40 border border-slate-800 text-xs text-slate-400 flex items-start gap-3">
-          <AlertCircle className="w-4 h-4 text-slate-500 shrink-0 mt-0.5" />
-          <div className="space-y-1">
-            <div className="text-slate-300 font-medium">جاهز لفصل مسارات الصوت</div>
-            <p className="leading-relaxed">
-              اضغط على زر <strong className="text-slate-200">«تشغيل فصل الصوت الآن»</strong> لتنفيذ الفصل التجريبي الفوري داخل المتصفح، أو ارفع ملف فيديو محلي لمعالجة الصوت الحقيقي للأنمي.
-            </p>
-          </div>
         </div>
       )}
     </div>

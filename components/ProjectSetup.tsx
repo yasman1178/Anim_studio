@@ -27,8 +27,8 @@ export function ProjectSetup({
   onVideoSelected,
   videoUrl
 }: ProjectSetupProps) {
-  const [sourceUrl, setSourceUrl] = useState(project.project_info.source_url || "");
-  const [urlStatus, setUrlStatus] = useState<'empty' | 'received' | 'needs_local'>('received');
+  const [sourceUrl, setSourceUrl] = useState("");
+  const [urlStatus, setUrlStatus] = useState<'empty' | 'received' | 'needs_local'>('empty');
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [rawJsonText, setRawJsonText] = useState(JSON.stringify(project, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -38,8 +38,8 @@ export function ProjectSetup({
     const normalized = normalizeNotebookLMProject(preset);
     onUpdateProject(normalized);
     setRawJsonText(JSON.stringify(normalized, null, 2));
-    setSourceUrl(normalized.project_info.source_url || "");
-    setUrlStatus('received');
+    setSourceUrl("");
+    setUrlStatus('empty');
   };
 
   // Handle custom JSON upload with automatic normalization

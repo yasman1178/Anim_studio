@@ -70,7 +70,7 @@ export const SAMPLE_PROJECT_SOLO_LEVELING: NotebookLMProject = {
     default_channel: "محب أنمي",
     target_language: "العربية المصرية",
     aspect_ratio: "16:9",
-    source_url: "https://www.youtube.com/watch?v=sample-solo-leveling"
+    source_url: ""
   },
   character_voice_mapping: {
     narrator: {
@@ -246,7 +246,7 @@ export const SAMPLE_PROJECT_JUJUTSU: NotebookLMProject = {
     default_channel: "محب أنمي",
     target_language: "العربية المصرية",
     aspect_ratio: "16:9",
-    source_url: "https://www.youtube.com/watch?v=sample-gojo-sukuna"
+    source_url: ""
   },
   character_voice_mapping: {
     narrator: {
@@ -366,7 +366,7 @@ export const SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3: NotebookLMProject = {
     default_channel: "محب أنمي",
     target_language: "العربية المصرية",
     aspect_ratio: "16:9",
-    source_url: "https://www.youtube.com/watch?v=solo-leveling-s3"
+    source_url: ""
   },
   character_voice_mapping: {
     "Seif (Sung Jinwoo)": {
