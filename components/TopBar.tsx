@@ -1,7 +1,8 @@
 "use client";
 
 import React from "react";
-import { Film, Download, CheckCircle2, Clapperboard } from "lucide-react";
+import { Film, Download, CheckCircle2, Clapperboard, HardDrive } from "lucide-react";
+import { formatBytes } from "@/lib/project-storage";
 
 interface TopBarProps {
   activeTab: string;
@@ -9,6 +10,8 @@ interface TopBarProps {
   onRenderClick: () => void;
   isRendering: boolean;
   totalShots: number;
+  onOpenStorage?: () => void;
+  storageStats?: { totalBytes: number; count: number };
 }
 
 export function TopBar({
@@ -16,7 +19,9 @@ export function TopBar({
   setActiveTab,
   onRenderClick,
   isRendering,
-  totalShots
+  totalShots,
+  onOpenStorage,
+  storageStats
 }: TopBarProps) {
   const navItems = [
     { id: "project", label: "المشروع والوسائط" },
@@ -60,6 +65,24 @@ export function TopBar({
 
       {/* Zone 3: Actions */}
       <div className="flex items-center gap-2.5 shrink-0">
+        {/* Project Storage Manager Button */}
+        {onOpenStorage && (
+          <button
+            type="button"
+            onClick={onOpenStorage}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium text-rose-300 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/60 hover:border-rose-700 rounded-lg transition-colors whitespace-nowrap cursor-pointer shadow-sm"
+            title="عرض وإدارة ذاكرة الموقع المحلية للمتصفح وحذف الملفات"
+          >
+            <HardDrive className="w-3.5 h-3.5 text-rose-400" />
+            <span>ذاكرة الموقع: {storageStats && storageStats.count > 0 ? formatBytes(storageStats.totalBytes) : '0 م.ب'}</span>
+            {storageStats && storageStats.count > 0 && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-900/80 text-rose-200 font-mono">
+                {storageStats.count}
+              </span>
+            )}
+          </button>
+        )}
+
         <a
           href="/Anim_dut_project.zip"
           download="Anim_dut_project.zip"

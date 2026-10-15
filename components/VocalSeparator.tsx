@@ -2,16 +2,19 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { separateAudioInBrowser, SeparationResult } from "@/lib/audio-separation";
-import { Play, Pause, RotateCcw, Volume2, VolumeX, CheckCircle, Sliders, Waves, Sparkles, AlertCircle, Upload, Film, FileAudio } from "lucide-react";
+import { saveMediaAsset } from "@/lib/project-storage";
+import { Play, Pause, RotateCcw, Volume2, VolumeX, CheckCircle, Sliders, Waves, Sparkles, AlertCircle, Upload, Film, FileAudio, HardDrive, ShieldCheck } from "lucide-react";
 
 interface VocalSeparatorProps {
   onStemsReady: (vocalsUrl: string, instrumentalUrl: string) => void;
   originalAudioUrl?: string | null;
+  onOpenStorageManager?: () => void;
 }
 
 export function VocalSeparator({
   onStemsReady,
-  originalAudioUrl
+  originalAudioUrl,
+  onOpenStorageManager
 }: VocalSeparatorProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -32,6 +35,36 @@ export function VocalSeparator({
   const vocalsAudioRef = useRef<HTMLAudioElement | null>(null);
   const instAudioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
+
+  // Helper to persist separated stems into browser IndexedDB
+  const persistStems = async (result: SeparationResult, sourceName: string) => {
+    try {
+      if (result.vocalsBlob) {
+        await saveMediaAsset({
+          name: `حوار أصلي (${sourceName}).wav`,
+          type: 'isolated_vocal',
+          blob: result.vocalsBlob,
+          mimeType: 'audio/wav',
+          metadata: { duration: result.duration, originalFileName: sourceName }
+        });
+      }
+      if (result.instrumentalBlob) {
+        await saveMediaAsset({
+          name: `موسيقى معزولة (${sourceName}).wav`,
+          type: 'isolated_instrumental',
+          blob: result.instrumentalBlob,
+          mimeType: 'audio/wav',
+          metadata: { duration: result.duration, originalFileName: sourceName }
+        });
+      }
+      setStorageNotice('تم حفظ مسار الموسيقى ومسار الحوار المعزول في ذاكرة الموقع بنجاح!');
+      setTimeout(() => setStorageNotice(null), 5000);
+    } catch (err) {
+      console.error('Failed to persist stems into IndexedDB:', err);
+    }
+  };
 
   // Handle local video/audio file selection for separation
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -124,6 +157,7 @@ export function VocalSeparator({
       setSeparationResult(result);
       setIsVerified(false);
       onStemsReady(result.vocalsAudioUrl, result.instrumentalAudioUrl);
+      await persistStems(result, "عينة أنمي سولو ليفلينج");
     } catch (err) {
       console.error("Demo separation error:", err);
       alert("حدث خطأ أثناء تشغيل العينة: " + String(err));
@@ -146,6 +180,7 @@ export function VocalSeparator({
       setSeparationResult(result);
       setIsVerified(false);
       onStemsReady(result.vocalsAudioUrl, result.instrumentalAudioUrl);
+      await persistStems(result, selectedFileName || "ملف الفيديو");
     } catch (err) {
       console.error("Separation error:", err);
       alert("حدث خطأ أثناء فصل ملف الصوت: " + String(err));
@@ -270,7 +305,37 @@ export function VocalSeparator({
             )}
           </div>
         ) : null}
+
+        {onOpenStorageManager && (
+          <button
+            type="button"
+            onClick={onOpenStorageManager}
+            className="px-3 py-1 text-xs font-semibold text-rose-300 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/60 rounded-md transition-colors cursor-pointer flex items-center gap-1.5"
+          >
+            <HardDrive className="w-3.5 h-3.5 text-rose-400" />
+            <span>ذاكرة الموقع وإدارة الملفات</span>
+          </button>
+        )}
       </div>
+
+      {/* Storage Notice Banner */}
+      {storageNotice && (
+        <div className="p-3 bg-emerald-950/60 border border-emerald-600/50 rounded-lg text-emerald-200 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{storageNotice}</span>
+          </div>
+          {onOpenStorageManager && (
+            <button
+              type="button"
+              onClick={onOpenStorageManager}
+              className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded transition shrink-0 cursor-pointer"
+            >
+              عرض ديلوج الذاكرة
+            </button>
+          )}
+        </div>
+      )}
 
       {/* File Source Selector Box */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">

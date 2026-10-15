@@ -5,6 +5,8 @@
 export interface SeparationResult {
   vocalsAudioUrl: string;
   instrumentalAudioUrl: string;
+  vocalsBlob?: Blob;
+  instrumentalBlob?: Blob;
   duration: number;
   sampleRate: number;
   qualityStatus: 'needs_review' | 'verified';
@@ -234,6 +236,8 @@ export async function separateAudioInBrowser(
   return {
     vocalsAudioUrl,
     instrumentalAudioUrl,
+    vocalsBlob,
+    instrumentalBlob,
     duration: Math.round(sourceBuffer.duration * 10) / 10,
     sampleRate,
     qualityStatus: 'needs_review',

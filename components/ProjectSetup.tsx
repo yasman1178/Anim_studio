@@ -8,7 +8,8 @@ import {
   SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3
 } from "@/lib/sample-data";
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, AlertTriangle, RefreshCw, Sparkles, Code2 } from "lucide-react";
+import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, AlertTriangle, RefreshCw, Sparkles, Code2, HardDrive, ShieldCheck } from "lucide-react";
+import { saveMediaAsset } from "@/lib/project-storage";
 
 interface ProjectSetupProps {
   project: NotebookLMProject;
@@ -17,6 +18,7 @@ interface ProjectSetupProps {
   videoDuration: number | null;
   onVideoSelected: (url: string, duration: number) => void;
   videoUrl?: string | null;
+  onOpenStorageManager?: () => void;
 }
 
 export function ProjectSetup({
@@ -25,13 +27,15 @@ export function ProjectSetup({
   validation,
   videoDuration,
   onVideoSelected,
-  videoUrl
+  videoUrl,
+  onOpenStorageManager
 }: ProjectSetupProps) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [urlStatus, setUrlStatus] = useState<'empty' | 'received' | 'needs_local'>('empty');
   const [showJsonEditor, setShowJsonEditor] = useState(false);
   const [rawJsonText, setRawJsonText] = useState(JSON.stringify(project, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [storageNotice, setStorageNotice] = useState<string | null>(null);
 
   // Handle explicit video URL loading (YouTube or direct video URL)
   const handleLoadVideoUrl = () => {
@@ -69,18 +73,31 @@ export function ProjectSetup({
     setUrlStatus('empty');
   };
 
-  // Handle custom JSON upload with automatic normalization
+  // Handle custom JSON upload with automatic normalization and local storage save
   const handleJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = (event) => {
+    reader.onload = async (event) => {
       try {
         const parsed = JSON.parse(event.target?.result as string);
         const normalized = normalizeNotebookLMProject(parsed);
         onUpdateProject(normalized);
         setRawJsonText(JSON.stringify(normalized, null, 2));
         setJsonError(null);
+
+        // Save JSON to browser IndexedDB
+        await saveMediaAsset({
+          name: file.name,
+          type: 'project_json',
+          blob: file,
+          mimeType: 'application/json',
+          metadata: {
+            notes: `مشروع: ${normalized.project_info?.title || 'بدون عنوان'}`
+          }
+        });
+        setStorageNotice(`تم حفظ ملف المشروع «${file.name}» في ذاكرة المتصفح بنجاح!`);
+        setTimeout(() => setStorageNotice(null), 4000);
       } catch (err) {
         setJsonError("خطأ في قراءة ملف JSON: " + String(err));
       }
@@ -88,15 +105,33 @@ export function ProjectSetup({
     reader.readAsText(file);
   };
 
-  // Handle local video upload
-  const handleVideoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle local video upload and save full video to IndexedDB
+  const handleVideoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const url = URL.createObjectURL(file);
     const video = document.createElement("video");
     video.src = url;
-    video.onloadedmetadata = () => {
+    video.onloadedmetadata = async () => {
       onVideoSelected(url, video.duration);
+
+      // Save full video into browser IndexedDB
+      try {
+        await saveMediaAsset({
+          name: file.name,
+          type: 'full_video',
+          blob: file,
+          mimeType: file.type || 'video/mp4',
+          metadata: {
+            originalFileName: file.name,
+            duration: video.duration || undefined,
+          }
+        });
+        setStorageNotice(`تم حفظ كامل ملف الفيديو «${file.name}» (${(file.size / (1024 * 1024)).toFixed(1)} م.ب) في ذاكرة المتصفح بنجاح!`);
+        setTimeout(() => setStorageNotice(null), 5000);
+      } catch (err) {
+        console.error("Failed to store video in IndexedDB:", err);
+      }
     };
   };
 
@@ -128,8 +163,18 @@ export function ProjectSetup({
           </p>
         </div>
 
-        {/* 1-Click Sample Loaders */}
+        {/* 1-Click Sample Loaders & Storage Manager */}
         <div className="flex flex-wrap items-center gap-2">
+          {onOpenStorageManager && (
+            <button
+              type="button"
+              onClick={onOpenStorageManager}
+              className="px-3 py-1 text-xs font-semibold text-rose-300 bg-rose-950/60 hover:bg-rose-900/60 border border-rose-700/60 rounded-md transition-colors cursor-pointer flex items-center gap-1.5"
+            >
+              <HardDrive className="w-3.5 h-3.5 text-rose-400" />
+              <span>ذاكرة الموقع وإدارة الملفات</span>
+            </button>
+          )}
           <span className="text-xs text-slate-400">نماذج جاهزة:</span>
           <button
             onClick={() => loadPreset(SAMPLE_PROJECT_SOLO_LEVELING_SEASON_3)}
@@ -151,6 +196,25 @@ export function ProjectSetup({
           </button>
         </div>
       </div>
+
+      {/* Local Storage Notice Banner */}
+      {storageNotice && (
+        <div className="p-3 bg-emerald-950/60 border border-emerald-600/50 rounded-lg text-emerald-200 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span>{storageNotice}</span>
+          </div>
+          {onOpenStorageManager && (
+            <button
+              type="button"
+              onClick={onOpenStorageManager}
+              className="px-2.5 py-1 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-500 text-white rounded transition shrink-0 cursor-pointer"
+            >
+              عرض ديلوج الذاكرة
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Main Grid: Video Reference & JSON Upload */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -231,8 +295,18 @@ export function ProjectSetup({
                 className="hidden"
               />
             </label>
+            {onOpenStorageManager && (
+              <button
+                type="button"
+                onClick={onOpenStorageManager}
+                className="w-full flex items-center justify-center gap-2 px-3 py-1.5 border border-slate-800 hover:border-slate-700 rounded-lg bg-slate-950/70 hover:bg-slate-900 text-[11px] text-slate-300 transition-colors cursor-pointer"
+              >
+                <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+                <span>اختيار من الفيديوهات المحفوظة في ذاكرة الموقع</span>
+              </button>
+            )}
             <p className="text-[10px] text-slate-500 leading-relaxed">
-              وفقاً لمواصفات V19: لا يتم الاعتماد على الكشط غير القانوني؛ ارفع ملف الفيديو الأصلي الذي تملك إذن استخدامه.
+              وفقاً لمواصفات V19: يتم حفظ كامل ملف الفيديو المرفوع محلياً في ذاكرة المتصفح (IndexedDB) للعمل عليه دون إعادة الرفع.
             </p>
           </div>
         </div>

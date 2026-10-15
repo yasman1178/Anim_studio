@@ -2,6 +2,7 @@
 
 import React, { useState } from "react";
 import { NotebookLMProject } from "@/lib/sample-data";
+import { saveAudioUrlAsset } from "@/lib/project-storage";
 import { Mic, Play, Pause, RotateCw, Volume2, CheckCircle2, AlertTriangle, Sparkles, User, Settings2 } from "lucide-react";
 
 interface VoiceGeneratorProps {
@@ -70,6 +71,14 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         };
         onUpdateProject(updatedProject);
 
+        // Save generated dialogue to IndexedDB storage
+        saveAudioUrlAsset(
+          data.audio_url,
+          `دبلجة [${line.character}] - لقطة ${shotIndex + 1}.mp3`,
+          'tts_audio',
+          { shotIndex, role: line.character, duration: data.duration_seconds }
+        );
+
         // Auto play generated audio
         playAudio(line.id, data.audio_url, line.line_egyptian);
       } else {
@@ -106,6 +115,12 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
       const data = await res.json();
       if (data.success && data.audio_url) {
+        saveAudioUrlAsset(
+          data.audio_url,
+          `صوت الراوي - لقطة ${shotIndex + 1}.mp3`,
+          'tts_audio',
+          { shotIndex, role: 'الراوي', duration: data.duration_seconds }
+        );
         playAudio(voId, data.audio_url, shot.voiceover_egyptian);
       } else {
         speakNative(shot.voiceover_egyptian, voId);
@@ -159,6 +174,13 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
               status: 'done'
             };
             onUpdateProject({ ...updatedProject });
+
+            saveAudioUrlAsset(
+              data.audio_url,
+              `دبلجة [${line.character}] - لقطة ${sIdx + 1}.mp3`,
+              'tts_audio',
+              { shotIndex: sIdx, role: line.character, duration: data.duration_seconds }
+            );
           }
         } catch (e) {
           console.error("Error generating for line:", line.id, e);

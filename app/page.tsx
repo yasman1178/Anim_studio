@@ -10,9 +10,11 @@ import { StudioTimeline } from "@/components/StudioTimeline";
 import { VfxSfxHub } from "@/components/VfxSfxHub";
 import { VideoCanvas } from "@/components/VideoCanvas";
 import { PublishingHub } from "@/components/PublishingHub";
+import StorageManager from "@/components/StorageManager";
 import { SAMPLE_PROJECT_SOLO_LEVELING, NotebookLMProject } from "@/lib/sample-data";
 import { ValidationResult, validateNotebookLMJson } from "@/lib/validate-json";
-import { Film, CheckCircle2, AlertCircle, Download, ExternalLink, Sparkles, Clapperboard, MonitorPlay } from "lucide-react";
+import { getStorageStats } from "@/lib/project-storage";
+import { Film, CheckCircle2, AlertCircle, Download, ExternalLink, Sparkles, Clapperboard, MonitorPlay, HardDrive } from "lucide-react";
 
 // Pure helper to determine current active VFX and text overlay
 function getActiveOverlayAndVfx(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
@@ -64,6 +66,31 @@ export default function AnimeDubStudioPage() {
   const [isRendering, setIsRendering] = useState(false);
   const [renderFinished, setRenderFinished] = useState(false);
 
+  // Storage manager modal state & stats
+  const [isStorageOpen, setIsStorageOpen] = useState(false);
+  const [storageStats, setStorageStats] = useState<{ totalBytes: number; count: number }>({
+    totalBytes: 0,
+    count: 0,
+  });
+
+  // Track and refresh local storage stats in real-time
+  useEffect(() => {
+    const updateStats = async () => {
+      try {
+        const stats = await getStorageStats();
+        setStorageStats({ totalBytes: stats.totalBytes, count: stats.count });
+      } catch (e) {
+        console.error("Failed to get storage stats:", e);
+      }
+    };
+
+    updateStats();
+    if (typeof window !== "undefined") {
+      window.addEventListener("animedub:storage_updated", updateStats);
+      return () => window.removeEventListener("animedub:storage_updated", updateStats);
+    }
+  }, []);
+
   // Synchronized playback timer
   const totalDuration = validation?.calculated_total_duration || 16.0;
 
@@ -104,6 +131,8 @@ export default function AnimeDubStudioPage() {
         onRenderClick={handleRenderClick}
         isRendering={isRendering}
         totalShots={project.shots.length}
+        onOpenStorage={() => setIsStorageOpen(true)}
+        storageStats={storageStats}
       />
 
       {/* Main Studio Viewport */}
@@ -167,6 +196,7 @@ export default function AnimeDubStudioPage() {
                   setVideoDuration(dur);
                 }}
                 videoUrl={videoUrl}
+                onOpenStorageManager={() => setIsStorageOpen(true)}
               />
               <ValidationReport
                 validation={validation}
@@ -184,6 +214,7 @@ export default function AnimeDubStudioPage() {
                   setSeparatedInstUrl(inst);
                 }}
                 originalAudioUrl={videoUrl}
+                onOpenStorageManager={() => setIsStorageOpen(true)}
               />
               <div className="p-4 rounded-xl bg-slate-900/60 border border-slate-800 text-xs text-slate-400 space-y-2">
                 <div className="font-semibold text-slate-200">
@@ -365,6 +396,23 @@ export default function AnimeDubStudioPage() {
           </div>
         </div>
       )}
+
+      {/* IndexedDB Project Storage & Media Manager Dialog */}
+      <StorageManager
+        isOpen={isStorageOpen}
+        onClose={() => setIsStorageOpen(false)}
+        onSelectVideoForProject={(url) => {
+          setVideoUrl(url);
+          const video = document.createElement("video");
+          video.src = url;
+          video.onloadedmetadata = () => {
+            setVideoDuration(video.duration || 180);
+          };
+        }}
+        onSelectAudioForProject={(url) => {
+          setVideoUrl(url);
+        }}
+      />
     </div>
   );
 }
