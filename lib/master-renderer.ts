@@ -149,23 +149,11 @@ export async function renderMasterProject(
     }
   };
 
-  // 3. Mix Background Music (BGM)
-  if (bgmAudioUrl) {
-    onProgress?.("دمج مسار الموسيقى التصويرية المعزولة (BGM)...", 60);
-    const bgmBuffer = await fetchAndDecode(bgmAudioUrl);
-    if (bgmBuffer) {
-      const source = offlineCtx.createBufferSource();
-      source.buffer = bgmBuffer;
-      const gain = offlineCtx.createGain();
-      gain.gain.value = 0.70; // Balanced background music level
-      source.connect(gain);
-      gain.connect(offlineCtx.destination);
-      source.start(0);
-    }
-  }
+  // Record active speech intervals for smart auto-ducking of BGM
+  const speechIntervals: Array<{ start: number; end: number }> = [];
 
-  // 4. Place voiceovers, dialogues, and SFX along the timeline
-  onProgress?.("مزامنة مقاطع الدبلجة المصرية ووضعها على الخط الزمني بدقة...", 75);
+  // 4. Place voiceovers and dialogues with strict non-overlapping scheduling
+  onProgress?.("مزامنة مقاطع الدبلجة المصرية ومنع تداخل الأصوات نهائياً...", 75);
 
   let accTime = 0;
   for (let sIdx = 0; sIdx < updatedProject.shots.length; sIdx++) {
@@ -173,7 +161,9 @@ export async function renderMasterProject(
     const shotStart = accTime;
     const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
 
-    // Render Voiceover if exists
+    let localCursor = shotStart;
+
+    // Render Voiceover if exists (Narrator speaks first)
     if (shot.voiceover_audio_url) {
       const voBuffer = await fetchAndDecode(shot.voiceover_audio_url);
       if (voBuffer) {
@@ -183,30 +173,71 @@ export async function renderMasterProject(
         gain.gain.value = 1.0;
         source.connect(gain);
         gain.connect(offlineCtx.destination);
-        source.start(shotStart);
+        source.start(localCursor);
+
+        const voDuration = voBuffer.duration || 2.5;
+        speechIntervals.push({ start: localCursor, end: localCursor + voDuration });
+        // Advance cursor with 250ms natural breath pause
+        localCursor += voDuration + 0.25;
       }
     }
 
-    // Render Dialogues
+    // Render Dialogues (ensure zero overlap with narrator or other characters)
     if (Array.isArray(shot.dialogue)) {
       for (const line of shot.dialogue) {
         if (line.audio_url) {
           const dlgBuffer = await fetchAndDecode(line.audio_url);
           if (dlgBuffer) {
+            // Respect trigger_sec only if it doesn't cause collision with previous speaker
+            const requestedStart = shotStart + (line.trigger_sec || 0);
+            const actualStart = Math.max(requestedStart, localCursor);
+
             const source = offlineCtx.createBufferSource();
             source.buffer = dlgBuffer;
             const gain = offlineCtx.createGain();
             gain.gain.value = 1.0;
             source.connect(gain);
             gain.connect(offlineCtx.destination);
-            const startSec = shotStart + (line.trigger_sec || 0);
-            source.start(startSec);
+            source.start(actualStart);
+
+            const lineDuration = dlgBuffer.duration || line.duration_sec || 2.0;
+            speechIntervals.push({ start: actualStart, end: actualStart + lineDuration });
+            // Advance cursor to ensure next speaker never speaks at same time
+            localCursor = actualStart + lineDuration + 0.25;
           }
         }
       }
     }
 
-    accTime += dur;
+    accTime += Math.max(dur, localCursor - shotStart);
+  }
+
+  // 3. Mix Background Music (BGM) with intelligent auto-ducking during speech
+  if (bgmAudioUrl) {
+    onProgress?.("دمج مسار الموسيقى التصويرية BGM مع الخفض التلقائي أثناء الكلام...", 82);
+    const bgmBuffer = await fetchAndDecode(bgmAudioUrl);
+    if (bgmBuffer) {
+      const source = offlineCtx.createBufferSource();
+      source.buffer = bgmBuffer;
+      const bgmGain = offlineCtx.createGain();
+      
+      // Default ambient music volume
+      bgmGain.gain.setValueAtTime(0.65, 0);
+
+      // Auto-ducking: gently drop BGM to 0.20 (-12dB) during dialogue, then restore to 0.65
+      speechIntervals.forEach((interval) => {
+        const duckStart = Math.max(0, interval.start - 0.15);
+        const duckEnd = Math.min(totalDuration, interval.end + 0.2);
+        bgmGain.gain.setValueAtTime(0.65, duckStart);
+        bgmGain.gain.linearRampToValueAtTime(0.20, interval.start);
+        bgmGain.gain.setValueAtTime(0.20, interval.end);
+        bgmGain.gain.linearRampToValueAtTime(0.65, duckEnd);
+      });
+
+      source.connect(bgmGain);
+      bgmGain.connect(offlineCtx.destination);
+      source.start(0);
+    }
   }
 
   // 5. Render Offline Context to Master Audio Buffer
@@ -286,19 +317,54 @@ export async function runFullAutomatedDubPipeline(
     }
   }
 
-  // Step 1: Extract and separate audio from video
-  onProgress?.("المرحلة 1: فك تشفير الصوت وفصل الموسيقى التصويرية BGM...", 15);
+  // Step 1: Extract and separate audio from video (FFmpeg Server + In-Browser DSP)
+  onProgress?.("المرحلة 1: عزل الحوار الأصلي وفصل مسار الموسيقى التصويرية (BGM)...", 15);
   let separatedStems: SeparationResult | null = null;
+  let bgmUrl: string | null = null;
+
   try {
-    const inputForSeparation = targetVideoBlob || videoSourceUrl || "/sample_anime.mp4";
-    separatedStems = await separateAudioInBrowser(inputForSeparation as any, (pct, msg) => {
-      onProgress?.(`فصل الصوت: ${msg}`, 15 + Math.round((pct / 100) * 20));
-    });
-  } catch (sepErr) {
-    console.warn("Audio separation fallback:", sepErr);
+    if (targetVideoBlob && targetVideoBlob.size > 0 && targetVideoBlob.size < 30 * 1024 * 1024) {
+      onProgress?.("تشغيل خوارزمية عزل الصوت الاستريو FFmpeg...", 20);
+      const sepForm = new FormData();
+      const vFile = new File([targetVideoBlob], "video.mp4", { type: targetVideoBlob.type || "video/mp4" });
+      sepForm.append("file", vFile);
+
+      const sepRes = await fetch("/api/separate-audio", {
+        method: "POST",
+        body: sepForm,
+      });
+
+      if (sepRes.ok) {
+        const sepData = await sepRes.json();
+        if (sepData.success && sepData.instrumentalAudioUrl) {
+          bgmUrl = sepData.instrumentalAudioUrl;
+          separatedStems = {
+            instrumentalAudioUrl: sepData.instrumentalAudioUrl,
+            vocalsAudioUrl: sepData.vocalsAudioUrl,
+            duration: sepData.duration || 18,
+            sampleRate: 44100,
+            qualityStatus: "verified",
+            modelUsed: "In-Browser DSP Spectral Separation (Free)"
+          };
+        }
+      }
+    }
+  } catch (serverSepErr) {
+    console.warn("Server FFmpeg separation skipped or failed, falling back to browser DSP:", serverSepErr);
   }
 
-  const bgmUrl = separatedStems?.instrumentalAudioUrl || null;
+  // Fallback to in-browser DSP if server separation didn't produce BGM
+  if (!bgmUrl) {
+    try {
+      const inputForSeparation = targetVideoBlob || videoSourceUrl || "/sample_anime.mp4";
+      separatedStems = await separateAudioInBrowser(inputForSeparation as any, (pct, msg) => {
+        onProgress?.(`فصل الصوت: ${msg}`, 15 + Math.round((pct / 100) * 20));
+      });
+      bgmUrl = separatedStems?.instrumentalAudioUrl || null;
+    } catch (sepErr) {
+      console.warn("Audio separation fallback:", sepErr);
+    }
+  }
 
   // Step 2 & 3: Generate all Edge-TTS lines and mix master audio
   onProgress?.("المرحلة 2 و 3: توليد مقاطع الدبلجة المصرية ومزجها مع BGM...", 40);

@@ -10,7 +10,8 @@ import {
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
 import { extractAndParseResilientJson } from "@/lib/resilient-json-parser";
 import { saveMediaAsset } from "@/lib/project-storage";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2, Play, RotateCw, Video, Waves } from "lucide-react";
+import { NOTEBOOKLM_EGYPTIAN_PROMPT } from "@/lib/notebooklm-prompt";
+import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2, Play, RotateCw, Video, Waves, BookOpen, Copy, Check } from "lucide-react";
 
 interface ProjectSetupProps {
   project: NotebookLMProject;

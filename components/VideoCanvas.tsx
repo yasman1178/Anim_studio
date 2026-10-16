@@ -278,6 +278,7 @@ export function VideoCanvas({
                 className="w-full h-full object-cover"
                 playsInline
                 controls={false}
+                muted={true}
                 onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
                 onLoadedMetadata={(e) => onDurationChange?.(e.currentTarget.duration)}
               />
