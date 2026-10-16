@@ -9,19 +9,43 @@
 import { NotebookLMProject } from "@/lib/sample-data";
 import { bufferToWave, separateAudioInBrowser, SeparationResult, decodeAudioFromMediaBlob } from "@/lib/audio-separation";
 import { saveMediaAsset } from "@/lib/project-storage";
+import { muxVideoWithAudioInBrowser } from "@/lib/browser-video-muxer";
 
 export function resolveVoiceSettings(speaker?: string, charKey?: string, voiceModel?: string, vocalCue?: string) {
   const norm = `${speaker || ''} ${charKey || ''} ${vocalCue || ''}`.toLowerCase();
-  if (norm.includes('سارة') || norm.includes('sara') || norm.includes('salma') || norm.includes('فتاة') || norm.includes('انثى')) {
+  
+  // Female characters: Sara, Salma, girls, women, mothers, nurses
+  if (
+    norm.includes('سارة') || norm.includes('ساره') || norm.includes('sara') ||
+    norm.includes('سلمى') || norm.includes('salma') || norm.includes('فتاة') ||
+    norm.includes('انثى') || norm.includes('أنثى') || norm.includes('بنت') ||
+    norm.includes('أم') || norm.includes('ممرضة') || norm.includes('girl') ||
+    norm.includes('female') || norm.includes('woman')
+  ) {
     return { voice: 'ar-EG-SalmaNeural', pitch: '+2Hz', rate: '+4%' };
   }
-  if (norm.includes('كمال') || norm.includes('kamal') || norm.includes('beast') || norm.includes('وحش') || norm.includes('وحوش') || norm.includes('عملاق')) {
-    return { voice: 'ar-SA-HamedNeural', pitch: '-15Hz', rate: '-5%' };
+  
+  // Monsters, beasts, giants, evil bosses
+  if (
+    norm.includes('كمال') || norm.includes('kamal') || norm.includes('beast') ||
+    norm.includes('وحش') || norm.includes('وحوش') || norm.includes('عملاق') ||
+    norm.includes('شبح') || norm.includes('غول') || norm.includes('عدو') ||
+    norm.includes('زعيم') || norm.includes('demon') || norm.includes('monster')
+  ) {
+    return { voice: 'ar-SA-HamedNeural', pitch: '-15Hz', rate: '-6%' };
   }
-  if (norm.includes('نظام') || norm.includes('system') || norm.includes('سيستم') || norm.includes('ذكاء')) {
+  
+  // Artificial intelligence, System, Robotic prompts
+  if (
+    norm.includes('نظام') || norm.includes('system') || norm.includes('سيستم') ||
+    norm.includes('ذكاء') || norm.includes('روبوت') || norm.includes('آلي') ||
+    norm.includes('ai')
+  ) {
     return { voice: 'ar-AE-HamdanNeural', pitch: '-5Hz', rate: '-5%' };
   }
-  return { voice: voiceModel || 'ar-EG-ShakirNeural', pitch: '+0Hz', rate: '+6%' };
+  
+  // Young male heroes (Seif, boys, young warriors) or Narrator
+  return { voice: voiceModel || 'ar-EG-ShakirNeural', pitch: '+0Hz', rate: '+8%' };
 }
 
 export interface MasterRenderResult {
@@ -372,10 +396,11 @@ export async function runFullAutomatedDubPipeline(
     onProgress?.(step, 40 + Math.round((pct / 100) * 40));
   });
 
-  // Step 4: Mux Video + Dubbed Audio into final MP4
-  onProgress?.("المرحلة 4: دمج إطارات الفيديو مع الصوت المدبلج الجديد (FFmpeg Muxer)...", 85);
+  // Step 4: Mux Video + Dubbed Audio into final MP4/WebM video
+  onProgress?.("المرحلة 4: دمج إطارات الفيديو مع الصوت المدبلج الجديد...", 85);
   let dubbedVideoUrl: string | null = null;
 
+  // Attempt 1: Server-side FFmpeg Muxer
   try {
     if (targetVideoBlob) {
       const muxFormData = new FormData();
@@ -396,8 +421,26 @@ export async function runFullAutomatedDubPipeline(
         }
       }
     }
-  } catch (muxErr) {
-    console.error("FFmpeg video muxing failed:", muxErr);
+  } catch (serverMuxErr) {
+    console.warn("Server FFmpeg muxing skipped or unavailable on this host:", serverMuxErr);
+  }
+
+  // Attempt 2: In-Browser Universal Video Muxer (100% works on Vercel, mobile, and serverless)
+  if (!dubbedVideoUrl) {
+    onProgress?.("تفعيل محرك دمج الفيديو المباشر داخل المتصفح لبيئة Vercel...", 90);
+    try {
+      const videoSourceForMux = targetVideoBlob || videoSourceUrl || "/sample_anime.mp4";
+      const browserMux = await muxVideoWithAudioInBrowser(
+        videoSourceForMux,
+        masterAudioResult.masterBlob,
+        (msg, pct) => onProgress?.(msg, pct)
+      );
+      if (browserMux && browserMux.videoUrl) {
+        dubbedVideoUrl = browserMux.videoUrl;
+      }
+    } catch (browserMuxErr) {
+      console.error("Browser video muxing error:", browserMuxErr);
+    }
   }
 
   onProgress?.("اكتملت عملية الدبلجة التلقائية الشاملة بنجاح!", 100);

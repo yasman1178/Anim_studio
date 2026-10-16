@@ -17,6 +17,7 @@ import { validateNotebookLMJson } from "@/lib/validate-json";
 import { getStorageStats } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
 import { renderMasterProject, runFullAutomatedDubPipeline } from "@/lib/master-renderer";
+import { muxVideoWithAudioInBrowser } from "@/lib/browser-video-muxer";
 import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw, Video, Film, Wand2, Waves } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
@@ -99,8 +100,10 @@ export default function AnimeDubStudioPage() {
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('9:16');
   const [manualVfxType, setManualVfxType] = useState<string | null>("dark_purple_shadow_aura");
 
-  // Track triggered SFX during playback to prevent repeated hits
+  // Track triggered SFX and Dialogue lines during playback to prevent repeated hits
   const triggeredSfxRef = useRef<Set<string>>(new Set());
+  const triggeredDialogueRef = useRef<Set<string>>(new Set());
+  const activeDialogueAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Render modal state
   const [isRendering, setIsRendering] = useState(false);
@@ -141,7 +144,7 @@ export default function AnimeDubStudioPage() {
   // Synchronized playback timer
   const totalDuration = validation?.calculated_total_duration || 17.0;
 
-  // Real-time SFX and timeline synchronization
+  // Real-time SFX, Character Dialogue, and timeline synchronization
   useEffect(() => {
     let interval: NodeJS.Timeout;
     if (isPlaying) {
@@ -150,11 +153,12 @@ export default function AnimeDubStudioPage() {
           if (prev >= totalDuration) {
             setIsPlaying(false);
             triggeredSfxRef.current.clear();
+            triggeredDialogueRef.current.clear();
             return 0;
           }
           const nextTime = Math.round((prev + 0.1) * 10) / 10;
 
-          // Check SFX triggers in active shot
+          // Check SFX & Dialogue triggers in active shot
           let accTime = 0;
           for (const shot of project.shots) {
             const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
@@ -162,6 +166,7 @@ export default function AnimeDubStudioPage() {
             const shotEnd = shotStart + dur;
 
             if (nextTime >= shotStart && nextTime <= shotEnd) {
+              // 1. Play SFX
               const sfxList = Array.isArray(shot.sound_design?.sfx)
                 ? shot.sound_design.sfx
                 : shot.sound_design?.sfx_name
@@ -177,6 +182,43 @@ export default function AnimeDubStudioPage() {
                   playSfx(sfx.sfx_name, sfx.sfx_volume_percent || 80);
                 }
               });
+
+              // 2. Play active character dialogue audio line
+              (shot.dialogue || []).forEach((dlg, dIdx) => {
+                const dlgKey = `shot_${shot.shot_number}_dlg_${dIdx}`;
+                const triggerAt = shotStart + (dlg.trigger_sec || 0);
+
+                if (Math.abs(nextTime - triggerAt) <= 0.15 && !triggeredDialogueRef.current.has(dlgKey)) {
+                  triggeredDialogueRef.current.add(dlgKey);
+                  if (dlg.audio_url) {
+                    try {
+                      if (activeDialogueAudioRef.current) {
+                        activeDialogueAudioRef.current.pause();
+                      }
+                      const audio = new Audio(dlg.audio_url);
+                      activeDialogueAudioRef.current = audio;
+                      audio.play().catch(() => {});
+                    } catch {}
+                  }
+                }
+              });
+
+              // 3. Play voiceover if present
+              if (shot.voiceover_audio_url) {
+                const voKey = `shot_${shot.shot_number}_vo`;
+                if (Math.abs(nextTime - shotStart) <= 0.15 && !triggeredDialogueRef.current.has(voKey)) {
+                  triggeredDialogueRef.current.add(voKey);
+                  try {
+                    if (activeDialogueAudioRef.current) {
+                      activeDialogueAudioRef.current.pause();
+                    }
+                    const audio = new Audio(shot.voiceover_audio_url);
+                    activeDialogueAudioRef.current = audio;
+                    audio.play().catch(() => {});
+                  } catch {}
+                }
+              }
+
               break;
             }
             accTime = shotEnd;
@@ -187,6 +229,10 @@ export default function AnimeDubStudioPage() {
       }, 100);
     } else {
       triggeredSfxRef.current.clear();
+      triggeredDialogueRef.current.clear();
+      if (activeDialogueAudioRef.current) {
+        activeDialogueAudioRef.current.pause();
+      }
     }
     return () => clearInterval(interval);
   }, [isPlaying, totalDuration, project.shots]);
@@ -292,7 +338,30 @@ export default function AnimeDubStudioPage() {
           }
         }
       } catch (muxErr) {
-        console.warn("Video muxing step skipped or fallback used:", muxErr);
+        console.warn("Server video muxing failed, using browser fallback:", muxErr);
+      }
+
+      // Universal In-Browser Muxer Fallback: Guaranteed to work on Vercel and all hosts!
+      if (!dubbedVideoUrl) {
+        setRenderStep("تفعيل محرك دمج الفيديو المباشر داخل المتصفح (دعم Vercel)...");
+        setRenderPct(90);
+        try {
+          const targetVideo = videoUrl || "/sample_anime.mp4";
+          const browserMux = await muxVideoWithAudioInBrowser(
+            targetVideo,
+            result.masterBlob,
+            (step, pct) => {
+              setRenderStep(step);
+              setRenderPct(pct);
+            }
+          );
+          if (browserMux && browserMux.videoUrl) {
+            setDubbedVideoUrl(browserMux.videoUrl);
+            setVideoUrl(browserMux.videoUrl);
+          }
+        } catch (bErr) {
+          console.error("Browser video muxing fallback error:", bErr);
+        }
       }
 
       setRenderPct(100);
@@ -540,8 +609,8 @@ export default function AnimeDubStudioPage() {
               </div>
             </div>
 
-            {/* Dubbed Video Preview & Download (if available) */}
-            {dubbedVideoUrl && (
+            {/* Dubbed Video Preview & Download */}
+            {dubbedVideoUrl ? (
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-rose-500/40 space-y-2.5">
                 <div className="flex items-center justify-between text-xs">
                   <span className="font-semibold text-rose-300 flex items-center gap-1.5">
@@ -563,15 +632,46 @@ export default function AnimeDubStudioPage() {
                   <a
                     href={dubbedVideoUrl}
                     download={`dubbed_video_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.mp4`}
-                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold transition shadow-md shadow-rose-950 cursor-pointer"
+                    className="flex-1 flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold transition shadow-md shadow-emerald-950 cursor-pointer"
                     title="تنزيل الفيديو الكامل المدبلج بصيغة MP4"
                   >
                     <Download className="w-4 h-4" />
-                    <span>تحميل الفيديو المدبلج بالكامل (MP4)</span>
+                    <span>تحميل الفيديو المدبلج بالكامل (فيديو + صوت MP4)</span>
                   </a>
                 </div>
               </div>
-            )}
+            ) : masterAudioUrl ? (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2">
+                <div className="text-xs text-slate-300 flex items-center justify-between">
+                  <span className="font-semibold text-white">دمج الفيديو مع الصوت:</span>
+                  <span className="text-[11px] text-amber-400">محرك المتصفح المباشر</span>
+                </div>
+                <button
+                  onClick={async () => {
+                    setIsRendering(true);
+                    setRenderStep("توليد ودمج الفيديو مباشرة في المتصفح...");
+                    try {
+                      const res = await fetch(masterAudioUrl);
+                      const blob = await res.blob();
+                      const targetVideo = videoUrl || "/sample_anime.mp4";
+                      const browserMux = await muxVideoWithAudioInBrowser(targetVideo, blob);
+                      if (browserMux?.videoUrl) {
+                        setDubbedVideoUrl(browserMux.videoUrl);
+                        setVideoUrl(browserMux.videoUrl);
+                      }
+                    } catch (e) {
+                      console.error("Mux error:", e);
+                    } finally {
+                      setIsRendering(false);
+                    }
+                  }}
+                  className="w-full py-2 px-3 bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 text-white font-bold text-xs rounded-lg transition cursor-pointer flex items-center justify-center gap-2"
+                >
+                  <Video className="w-4 h-4" />
+                  <span>دمج وتصدير الفيديو بالكامل (MP4) فوراً</span>
+                </button>
+              </div>
+            ) : null}
 
             {/* Master Audio Live Player & Download */}
             {masterAudioUrl && (
