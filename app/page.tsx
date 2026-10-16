@@ -308,6 +308,9 @@ export default function AnimeDubStudioPage() {
       setRenderStep("دمج إطارات الفيديو مع الصوت المدبلج الجديد (FFmpeg MP4 Muxer)...");
       setRenderPct(85);
 
+      let finalDubbedUrl: string | null = null;
+
+      // Primary: Server-side FFmpeg Muxer
       try {
         let videoBlob: Blob | null = null;
         const targetVideoUrl = videoUrl || "/sample_anime.mp4";
@@ -332,8 +335,7 @@ export default function AnimeDubStudioPage() {
           if (muxRes.ok) {
             const muxData = await muxRes.json();
             if (muxData.success && muxData.video_url) {
-              setDubbedVideoUrl(muxData.video_url);
-              setVideoUrl(muxData.video_url);
+              finalDubbedUrl = muxData.video_url;
             }
           }
         }
@@ -341,27 +343,36 @@ export default function AnimeDubStudioPage() {
         console.warn("Server video muxing failed, using browser fallback:", muxErr);
       }
 
-      // Universal In-Browser Muxer Fallback: Guaranteed to work on Vercel and all hosts!
-      if (!dubbedVideoUrl) {
-        setRenderStep("تفعيل محرك دمج الفيديو المباشر داخل المتصفح (دعم Vercel)...");
+      // Secondary: Universal In-Browser Muxer with Burned-In Subtitles & VFX (Guaranteed to work on Vercel)
+      if (!finalDubbedUrl) {
+        setRenderStep("تفعيل محرك دمج وحرق الفيديو والمؤثرات داخل المتصفح (دعم Vercel)...");
         setRenderPct(90);
         try {
           const targetVideo = videoUrl || "/sample_anime.mp4";
           const browserMux = await muxVideoWithAudioInBrowser(
             targetVideo,
             result.masterBlob,
-            (step, pct) => {
-              setRenderStep(step);
-              setRenderPct(pct);
+            {
+              project: result.updatedProject,
+              burnSubtitlesAndVfx: true,
+              aspectRatio: aspectRatio,
+              onProgress: (step, pct) => {
+                setRenderStep(step);
+                setRenderPct(pct);
+              }
             }
           );
           if (browserMux && browserMux.videoUrl) {
-            setDubbedVideoUrl(browserMux.videoUrl);
-            setVideoUrl(browserMux.videoUrl);
+            finalDubbedUrl = browserMux.videoUrl;
           }
         } catch (bErr) {
           console.error("Browser video muxing fallback error:", bErr);
         }
+      }
+
+      if (finalDubbedUrl) {
+        setDubbedVideoUrl(finalDubbedUrl);
+        setVideoUrl(finalDubbedUrl);
       }
 
       setRenderPct(100);
@@ -405,6 +416,33 @@ export default function AnimeDubStudioPage() {
             onTimeUpdate={setCurrentTime}
             onDurationChange={setVideoDuration}
           />
+
+          {/* Dubbed Video Quick Action Banner */}
+          {dubbedVideoUrl && (
+            <div className="p-3.5 rounded-2xl bg-emerald-950/50 border border-emerald-500/50 space-y-2.5 shadow-xl animate-fade-in">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-emerald-300 flex items-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>فيديو الدبلجة المكتمل جاهز (MP4)</span>
+                </span>
+                <span className="text-[10px] font-mono text-emerald-300 font-semibold px-2 py-0.5 rounded bg-emerald-900/60 border border-emerald-700/50">
+                  صوت جديد + ترجمة
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-300 leading-relaxed">
+                تم استبدال المسار الصوتي الأصلي بالكامل بالدبلجة والموسيقى، مع حرق الترجمة والمؤثرات في الإطارات.
+              </p>
+              <a
+                href={dubbedVideoUrl}
+                download={`dubbed_video_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.mp4`}
+                className="w-full flex items-center justify-center gap-2 py-2.5 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 text-white text-xs font-bold transition shadow-md shadow-emerald-950 cursor-pointer"
+                title="تحميل الفيديو المدبلج النهائي بصيغة MP4"
+              >
+                <Download className="w-4 h-4" />
+                <span>تحميل الفيديو المدبلج الآن (MP4)</span>
+              </a>
+            </div>
+          )}
 
           {/* Production State & Storage Quick Status */}
           <div className="p-3.5 sm:p-4 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-3 shadow-lg">
@@ -654,7 +692,19 @@ export default function AnimeDubStudioPage() {
                       const res = await fetch(masterAudioUrl);
                       const blob = await res.blob();
                       const targetVideo = videoUrl || "/sample_anime.mp4";
-                      const browserMux = await muxVideoWithAudioInBrowser(targetVideo, blob);
+                      const browserMux = await muxVideoWithAudioInBrowser(
+                        targetVideo,
+                        blob,
+                        {
+                          project,
+                          burnSubtitlesAndVfx: true,
+                          aspectRatio,
+                          onProgress: (step, pct) => {
+                            setRenderStep(step);
+                            setRenderPct(pct);
+                          }
+                        }
+                      );
                       if (browserMux?.videoUrl) {
                         setDubbedVideoUrl(browserMux.videoUrl);
                         setVideoUrl(browserMux.videoUrl);

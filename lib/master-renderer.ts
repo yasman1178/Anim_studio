@@ -433,7 +433,12 @@ export async function runFullAutomatedDubPipeline(
       const browserMux = await muxVideoWithAudioInBrowser(
         videoSourceForMux,
         masterAudioResult.masterBlob,
-        (msg, pct) => onProgress?.(msg, pct)
+        {
+          project,
+          burnSubtitlesAndVfx: true,
+          aspectRatio: '9:16',
+          onProgress: (msg, pct) => onProgress?.(msg, pct),
+        }
       );
       if (browserMux && browserMux.videoUrl) {
         dubbedVideoUrl = browserMux.videoUrl;

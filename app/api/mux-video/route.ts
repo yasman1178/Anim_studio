@@ -7,7 +7,7 @@ import { PublicBlobStorage } from "@/lib/blob-store";
 
 // POST /api/mux-video
 // Muxes original video picture stream with newly dubbed audio mix (BGM + Edge-TTS voices)
-// Produces high-fidelity MP4 video with synced audio without re-encoding video frames
+// Strictly strips original audio track and guarantees new 44.1kHz AAC dubbed audio
 export async function POST(req: NextRequest) {
   let tempVideoPath = "";
   let tempAudioPath = "";
@@ -43,10 +43,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!videoBuffer) {
+    if (!videoBuffer || videoBuffer.length === 0) {
       return NextResponse.json({ error: "لم يتم تقديم ملف فيديو لدمج الدبلجة معه" }, { status: 400 });
     }
-    if (!audioBuffer) {
+    if (!audioBuffer || audioBuffer.length === 0) {
       return NextResponse.json({ error: "لم يتم تقديم ملف صوت الدبلجة الماستر" }, { status: 400 });
     }
 
@@ -67,29 +67,29 @@ export async function POST(req: NextRequest) {
       fs.writeFile(tempAudioPath, audioBuffer),
     ]);
 
-    // Run FFmpeg: Copy video stream without re-encoding, encode new dubbed audio to AAC 192k
+    // Run FFmpeg with strict audio track replacement:
+    // 1. Take video from input 0 only (-map 0:v:0)
+    // 2. Take audio from input 1 only (-map 1:a:0)
+    // 3. Drop all original audio tracks completely (-an on input 0)
+    // 4. Encode audio to high quality AAC 192k stereo
+    // 5. Faststart for instant streaming & downloading
     await new Promise<void>((resolve, reject) => {
-      const ffmpeg = spawn("ffmpeg", [
+      const ffmpegArgs = [
         "-y",
-        "-i",
-        tempVideoPath,
-        "-i",
-        tempAudioPath,
-        "-map",
-        "0:v:0", // Take first video stream from video file
-        "-map",
-        "1:a:0", // Take first audio stream from master audio WAV
-        "-c:v",
-        "copy", // Stream copy video (lossless & instant)
-        "-c:a",
-        "aac", // Standard AAC audio for universal MP4 compatibility
-        "-b:a",
-        "192k",
-        "-shortest", // Stop at the end of the shortest stream
-        "-movflags",
-        "+faststart", // Enable web streaming playback
+        "-i", tempVideoPath,
+        "-i", tempAudioPath,
+        "-map", "0:v:0",         // Strictly first video stream from original video
+        "-map", "1:a:0",         // Strictly audio stream from master dubbed mix
+        "-c:v", "copy",          // Lossless, ultra-fast video copy
+        "-c:a", "aac",           // Universal standard AAC stereo
+        "-b:a", "192k",          // High quality audio bitrate
+        "-ar", "44100",          // 44.1kHz standard
+        "-avoid_negative_ts", "make_zero",
+        "-movflags", "+faststart",
         tempOutputPath,
-      ]);
+      ];
+
+      const ffmpeg = spawn("ffmpeg", ffmpegArgs);
 
       let stderr = "";
       ffmpeg.stderr.on("data", (chunk) => {

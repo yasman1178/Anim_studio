@@ -1,7 +1,9 @@
 // lib/browser-video-muxer.ts
-// In-Browser Universal Video & Audio Muxer
+// Universal In-Browser Video & Audio Muxer with Burned-In Arabic Subtitles & VFX
 // Works 100% on Vercel, serverless deployments, mobile Chrome & Safari.
-// Combines original video frames with the newly dubbed audio mix into a finished video file.
+// Strictly eliminates original audio, bakes newly dubbed audio, and renders subtitles & VFX onto frames.
+
+import { NotebookLMProject } from "@/lib/sample-data";
 
 export interface MuxResult {
   videoBlob: Blob;
@@ -10,41 +12,76 @@ export interface MuxResult {
   duration: number;
 }
 
+export interface MuxOptions {
+  project?: NotebookLMProject | null;
+  burnSubtitlesAndVfx?: boolean;
+  aspectRatio?: '9:16' | '16:9';
+  onProgress?: (step: string, pct: number) => void;
+}
+
 export async function muxVideoWithAudioInBrowser(
   videoInput: string | Blob,
   audioBlob: Blob,
-  onProgress?: (step: string, pct: number) => void
+  options?: MuxOptions | ((step: string, pct: number) => void)
 ): Promise<MuxResult> {
-  onProgress?.("تهيئة محرك دمج الفيديو داخل المتصفح (Web Video Muxer)...", 75);
+  const onProgress = typeof options === "function" ? options : options?.onProgress;
+  const project = typeof options === "object" ? options?.project : null;
+  const burnSubtitlesAndVfx = typeof options === "object" ? (options?.burnSubtitlesAndVfx ?? true) : true;
+  const aspectRatio = typeof options === "object" ? (options?.aspectRatio ?? '9:16') : '9:16';
+
+  onProgress?.("تهيئة محرك دمج وحرق الفيديو والمؤثرات (Universal Video Muxer)...", 75);
 
   return new Promise(async (resolve, reject) => {
     let videoUrl = "";
+    let shouldRevokeInput = false;
+
     if (typeof videoInput === "string") {
       videoUrl = videoInput;
     } else {
       videoUrl = URL.createObjectURL(videoInput);
+      shouldRevokeInput = true;
     }
 
     const video = document.createElement("video");
     video.src = videoUrl;
     video.crossOrigin = "anonymous";
-    video.muted = true; // Mute video picture so we only capture the new dubbed audio!
+    video.muted = true; // Crucial: Mute original audio track so it is 100% stripped from output!
     video.playsInline = true;
     video.preload = "auto";
 
+    // Required for mobile/headless DOM playback stability
+    video.style.position = "fixed";
+    video.style.top = "-9999px";
+    video.style.left = "-9999px";
+    video.style.width = "1px";
+    video.style.height = "1px";
+    video.style.opacity = "0";
+    document.body.appendChild(video);
+
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
     const audioCtx = new AudioContextClass({ sampleRate: 44100 });
+
+    const cleanup = () => {
+      try {
+        if (video.parentNode) {
+          video.parentNode.removeChild(video);
+        }
+        if (shouldRevokeInput) {
+          URL.revokeObjectURL(videoUrl);
+        }
+      } catch {}
+    };
 
     try {
       // 1. Wait for video metadata
       await new Promise<void>((res, rej) => {
         video.onloadedmetadata = () => res();
         video.onerror = (e) => rej(new Error("تعذر قراءة ملف الفيديو في المتصفح"));
-        setTimeout(() => res(), 3500); // Safety timeout
+        setTimeout(() => res(), 4000); // Safety timeout
       });
 
-      const videoDuration = Math.min(video.duration || 18, 180);
-      onProgress?.(`تحضير إطارات الفيديو (${videoDuration.toFixed(1)} ثانية)...`, 80);
+      const videoDuration = Math.min(Math.max(video.duration || 10, 5), 300);
+      onProgress?.(`تحضير إطارات الفيديو (${videoDuration.toFixed(1)}s) وحرق الترجمة والمؤثرات...`, 80);
 
       // 2. Decode master audio into AudioBuffer
       const audioArrayBuffer = await audioBlob.arrayBuffer();
@@ -55,34 +92,161 @@ export async function muxVideoWithAudioInBrowser(
       const audioSource = audioCtx.createBufferSource();
       audioSource.buffer = audioBuffer;
       audioSource.connect(streamDestination);
-      audioSource.connect(audioCtx.destination); // For real-time monitoring
 
-      // 4. Extract video stream using canvas or captureStream
-      const width = video.videoWidth || 720;
-      const height = video.videoHeight || 1280;
+      // 4. Setup High-Definition Canvas for Video + VFX + Arabic Subtitles
+      const isVertical = aspectRatio === '9:16';
+      const targetWidth = isVertical ? 720 : 1280;
+      const targetHeight = isVertical ? 1280 : 720;
 
       const canvas = document.createElement("canvas");
-      canvas.width = width;
-      canvas.height = height;
-      const ctx = canvas.getContext("2d");
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      const ctx = canvas.getContext("2d", { alpha: false });
 
-      let videoStream: MediaStream;
-      if (typeof (video as any).captureStream === "function") {
-        try {
-          videoStream = (video as any).captureStream(30);
-        } catch {
-          videoStream = canvas.captureStream(30);
-        }
-      } else {
-        videoStream = canvas.captureStream(30);
+      if (!ctx) {
+        throw new Error("تعذر تهيئة معالج الرسوميات 2D Canvas");
       }
 
-      // Combine video track and audio track
+      // Pre-calculate subtitle timeline if project is provided
+      interface TimedSubtitle {
+        start: number;
+        end: number;
+        speaker: string;
+        text: string;
+        vfxType?: string;
+      }
+      const subtitleList: TimedSubtitle[] = [];
+
+      if (project?.shots) {
+        let acc = 0;
+        for (const shot of project.shots) {
+          const sDur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
+          const sStart = acc;
+          const sEnd = sStart + sDur;
+
+          const activeVfx = shot.vfx_spatial_layers?.[0]?.layer_type || (shot as any).vfx_type || undefined;
+
+          if (shot.voiceover_egyptian) {
+            subtitleList.push({
+              start: sStart,
+              end: Math.min(sEnd, sStart + 3.0),
+              speaker: "الراوي",
+              text: shot.voiceover_egyptian,
+              vfxType: activeVfx,
+            });
+          }
+
+          if (Array.isArray(shot.dialogue)) {
+            for (const line of shot.dialogue) {
+              const lineStart = sStart + (line.trigger_sec || 0);
+              const lineDur = line.duration_sec || 2.2;
+              subtitleList.push({
+                start: lineStart,
+                end: Math.min(sEnd, lineStart + lineDur),
+                speaker: line.speaker || line.character || "شخصية",
+                text: line.line_egyptian || line.line || "",
+                vfxType: activeVfx,
+              });
+            }
+          }
+          acc = sEnd;
+        }
+      }
+
+      // Frame Drawing Engine: Renders video + active VFX + styled subtitles
+      let frameCount = 0;
+      const drawFrame = (currentTime: number) => {
+        if (!ctx) return;
+
+        // A. Draw video frame with cover fit
+        const srcW = video.videoWidth || targetWidth;
+        const srcH = video.videoHeight || targetHeight;
+
+        // Compute aspect cover
+        const scale = Math.max(targetWidth / srcW, targetHeight / srcH);
+        const drawW = srcW * scale;
+        const drawH = srcH * scale;
+        const dx = (targetWidth - drawW) / 2;
+        const dy = (targetHeight - drawH) / 2;
+
+        try {
+          ctx.drawImage(video, dx, dy, drawW, drawH);
+        } catch {
+          // If video isn't ready, draw stylized anime dark backdrop
+          ctx.fillStyle = "#0B0F19";
+          ctx.fillRect(0, 0, targetWidth, targetHeight);
+        }
+
+        // B. Burned-in Subtitles & VFX if enabled
+        if (burnSubtitlesAndVfx) {
+          // Find active subtitle
+          const activeSub = subtitleList.find((s) => currentTime >= s.start && currentTime <= s.end);
+
+          // Render active VFX Aura if present
+          if (activeSub?.vfxType === "dark_purple_shadow_aura") {
+            const pulse = Math.sin(frameCount * 0.1) * 0.2 + 0.4;
+            const grad = ctx.createRadialGradient(
+              targetWidth / 2, targetHeight * 0.6, 50,
+              targetWidth / 2, targetHeight * 0.6, targetWidth * 0.7
+            );
+            grad.addColorStop(0, "transparent");
+            grad.addColorStop(0.7, `rgba(109, 40, 217, ${0.35 * pulse})`);
+            grad.addColorStop(1, `rgba(15, 23, 42, ${0.65 * pulse})`);
+            ctx.fillStyle = grad;
+            ctx.fillRect(0, 0, targetWidth, targetHeight);
+          } else if (activeSub?.vfxType === "impact_flash") {
+            const flashAlpha = Math.max(0, 0.6 - ((frameCount % 20) * 0.04));
+            ctx.fillStyle = `rgba(255, 255, 255, ${flashAlpha})`;
+            ctx.fillRect(0, 0, targetWidth, targetHeight);
+          }
+
+          // Render styled Arabic Subtitles Banner at bottom
+          if (activeSub && activeSub.text) {
+            const bannerY = targetHeight - (isVertical ? 180 : 110);
+            const bannerH = isVertical ? 90 : 65;
+
+            // Translucent rounded backdrop
+            ctx.save();
+            ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+            ctx.strokeStyle = "rgba(244, 63, 94, 0.4)";
+            ctx.lineWidth = 2;
+            
+            const rectX = targetWidth * 0.05;
+            const rectW = targetWidth * 0.90;
+            const radius = 16;
+            
+            ctx.beginPath();
+            ctx.roundRect(rectX, bannerY, rectW, bannerH, radius);
+            ctx.fill();
+            ctx.stroke();
+
+            // Speaker Tag Badge
+            ctx.font = `bold ${isVertical ? 18 : 15}px system-ui, -apple-system, sans-serif`;
+            ctx.fillStyle = "#FDA4AF";
+            ctx.textAlign = "right";
+            ctx.direction = "rtl";
+            ctx.fillText(`[${activeSub.speaker}]`, rectX + rectW - 20, bannerY + (isVertical ? 30 : 24));
+
+            // Spoken Arabic Line
+            ctx.font = `bold ${isVertical ? 22 : 18}px system-ui, -apple-system, sans-serif`;
+            ctx.fillStyle = "#FFFFFF";
+            ctx.textAlign = "center";
+            ctx.direction = "rtl";
+            ctx.fillText(activeSub.text, targetWidth / 2, bannerY + (isVertical ? 65 : 48));
+            ctx.restore();
+          }
+        }
+
+        frameCount++;
+      };
+
+      // 5. Create Combined MediaStream (Canvas Video + Master Dubbed Audio)
+      const videoStream = canvas.captureStream(30);
       const combinedStream = new MediaStream();
       videoStream.getVideoTracks().forEach((track) => combinedStream.addTrack(track));
       streamDestination.stream.getAudioTracks().forEach((track) => combinedStream.addTrack(track));
 
-      // 5. Select compatible MIME type
+      // 6. Select Compatible MIME type
       const mimeTypes = [
         "video/mp4",
         "video/mp4;codecs=avc1,mp4a.40.2",
@@ -100,7 +264,7 @@ export async function muxVideoWithAudioInBrowser(
 
       const recorder = new MediaRecorder(combinedStream, {
         mimeType: selectedMimeType,
-        videoBitsPerSecond: 2500000, // 2.5 Mbps crisp quality
+        videoBitsPerSecond: 3500000, // 3.5 Mbps high bitrate
       });
 
       const recordedChunks: Blob[] = [];
@@ -111,24 +275,25 @@ export async function muxVideoWithAudioInBrowser(
         }
       };
 
-      let animationFrameId: number;
-      const drawCanvasFrame = () => {
-        if (!video.paused && !video.ended && ctx) {
-          ctx.drawImage(video, 0, 0, width, height);
-          animationFrameId = requestAnimationFrame(drawCanvasFrame);
+      let animLoopId: number;
+      const renderLoop = () => {
+        drawFrame(video.currentTime);
+        if (recorder.state === "recording") {
+          animLoopId = requestAnimationFrame(renderLoop);
         }
       };
 
       recorder.onstop = () => {
-        cancelAnimationFrame(animationFrameId);
+        cancelAnimationFrame(animLoopId);
         try {
           audioSource.stop();
         } catch {}
+        cleanup();
 
         const finalBlob = new Blob(recordedChunks, { type: selectedMimeType });
         const finalUrl = URL.createObjectURL(finalBlob);
 
-        onProgress?.("اكتمل دمج الفيديو بالصوت المدبلج بنجاح!", 100);
+        onProgress?.("اكتمل إنتاج الفيديو المدبلج بالكامل بحرق الترجمة والمؤثرات بنجاح!", 100);
         resolve({
           videoBlob: finalBlob,
           videoUrl: finalUrl,
@@ -137,21 +302,20 @@ export async function muxVideoWithAudioInBrowser(
         });
       };
 
-      // 6. Start Recording & Playback
+      // 7. Start Playback & Recording
       recorder.start(200);
       audioSource.start(0);
       video.currentTime = 0;
       await video.play().catch(() => {});
-      drawCanvasFrame();
+      renderLoop();
 
-      onProgress?.("جارِ تسجيل ومزامنة الفيديو مع أصوات الدبلجة...", 88);
+      onProgress?.("جارِ مزامنة وتسجيل إطارات الفيديو مع أصوات الدبلجة المصرية...", 88);
 
-      // Track progress during recording
       const startTime = Date.now();
       const progressInterval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
         const pct = Math.min(98, 88 + Math.round((elapsed / videoDuration) * 10));
-        onProgress?.(`دمج الفيديو والصوت: ${Math.round(elapsed)}s / ${Math.round(videoDuration)}s`, pct);
+        onProgress?.(`دمج الفيديو والصوت والترجمة: ${Math.round(elapsed)}s / ${Math.round(videoDuration)}s`, pct);
 
         if (video.ended || elapsed >= videoDuration) {
           clearInterval(progressInterval);
@@ -170,7 +334,9 @@ export async function muxVideoWithAudioInBrowser(
       };
     } catch (err) {
       console.error("Browser video muxing error:", err);
-      // Fallback: Return master audio as playable blob URL
+      cleanup();
+
+      // Return audio blob as emergency fallback
       const finalUrl = URL.createObjectURL(audioBlob);
       resolve({
         videoBlob: audioBlob,
