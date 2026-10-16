@@ -9,8 +9,8 @@ import {
 } from "@/lib/sample-data";
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
 import { extractAndParseResilientJson } from "@/lib/resilient-json-parser";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2 } from "lucide-react";
 import { saveMediaAsset } from "@/lib/project-storage";
+import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2, Play, RotateCw, Video, Waves } from "lucide-react";
 
 interface ProjectSetupProps {
   project: NotebookLMProject;
@@ -20,6 +20,8 @@ interface ProjectSetupProps {
   onVideoSelected: (url: string, duration: number) => void;
   videoUrl?: string | null;
   onOpenStorageManager?: () => void;
+  onStartAutoPipeline?: () => void;
+  isPipelineRunning?: boolean;
 }
 
 export function ProjectSetup({
@@ -29,7 +31,9 @@ export function ProjectSetup({
   videoDuration,
   onVideoSelected,
   videoUrl,
-  onOpenStorageManager
+  onOpenStorageManager,
+  onStartAutoPipeline,
+  isPipelineRunning
 }: ProjectSetupProps) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [urlStatus, setUrlStatus] = useState<'empty' | 'received' | 'needs_local'>('empty');
@@ -198,6 +202,67 @@ export function ProjectSetup({
         <p className="text-xs text-slate-400">
           حدد مصدر الفيديو أو ارفع ملفك، واختر سيناريو الدبلجة v18 المعتمد لقناة «محب أنمي»
         </p>
+      </div>
+
+      {/* 1-Click Automated Dubbing Pipeline Action Banner */}
+      <div className="relative overflow-hidden rounded-2xl border-2 border-rose-500/60 bg-gradient-to-br from-rose-950/70 via-slate-900 to-indigo-950/70 p-4 sm:p-5 shadow-2xl space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <span className="flex h-2.5 w-2.5 rounded-full bg-rose-500 animate-pulse" />
+              <h4 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                <span>خط أنابيب الدبلجة وفصل الصوت التلقائي المتكامل</span>
+                <span className="text-[10px] font-mono font-semibold px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                  1-Click Automation
+                </span>
+              </h4>
+            </div>
+            <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+              يقوم آلياً باستخراج وفصل صوت الفيديو، وتوليد نطق كافة مقاطع الدبلجة والراوي من ملف الجيسون عبر Edge-TTS، ومزامنتها مع الموسيقى التصويرية وتصدير فيديو MP4 مدبلج كامل وماستر صوتي WAV فوراً.
+            </p>
+          </div>
+
+          {onStartAutoPipeline && (
+            <button
+              type="button"
+              onClick={onStartAutoPipeline}
+              disabled={isPipelineRunning}
+              className="flex items-center justify-center gap-2 px-5 py-3 rounded-xl font-bold text-xs sm:text-sm text-white bg-gradient-to-r from-rose-600 via-rose-500 to-pink-600 hover:from-rose-500 hover:to-pink-500 disabled:opacity-60 shadow-lg shadow-rose-900/40 transition-all transform active:scale-95 cursor-pointer shrink-0"
+            >
+              {isPipelineRunning ? (
+                <>
+                  <RotateCw className="w-4 h-4 animate-spin text-white" />
+                  <span>جارِ معالجة خط الأنابيب المتكامل...</span>
+                </>
+              ) : (
+                <>
+                  <Wand2 className="w-4 h-4 text-amber-300" />
+                  <span>بدء الدبلجة التلقائية الشاملة بضغطة زر</span>
+                </>
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Pipeline steps quick breadcrumb */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-2 border-t border-slate-800/80 text-[11px] text-slate-400 font-mono">
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-slate-800 text-rose-400 flex items-center justify-center text-[10px] font-bold">1</span>
+            <span>استخراج وفصل BGM</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-slate-800 text-amber-400 flex items-center justify-center text-[10px] font-bold">2</span>
+            <span>توليد Edge-TTS</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-slate-800 text-sky-400 flex items-center justify-center text-[10px] font-bold">3</span>
+            <span>مزامنة الخط الزمني</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-4 h-4 rounded-full bg-slate-800 text-emerald-400 flex items-center justify-center text-[10px] font-bold">4</span>
+            <span>تصدير MP4 + WAV</span>
+          </div>
+        </div>
       </div>
 
       {/* Preset Project Loaders - Responsive Grid */}

@@ -101,30 +101,39 @@ export function normalizeNotebookLMProject(raw: any): any {
         durationSec = 5.0; // safe fallback
       }
 
-      // Normalize dialogue lines (support line or line_egyptian, speaker or character)
-      const dialogue = Array.isArray(shot.dialogue)
-        ? shot.dialogue.map((dlg: any, dIdx: number) => {
-            const speaker = dlg.speaker || dlg.character || "شخصية";
-            const voiceProfile = dlg.voice_profile || dlg.vocal_cue || "narrator";
-            const spokenLine = dlg.line || dlg.line_egyptian || "";
-
-            return {
-              id: dlg.id || `shot_${shotNum}_dlg_${dIdx + 1}`,
-              character: speaker,
-              character_ar: dlg.character_ar || speaker,
-              speaker,
-              line_original: dlg.line_original || "",
-              line_egyptian: spokenLine,
-              line: spokenLine,
-              voice_model: dlg.voice_model || "ar-EG-ShakirNeural",
-              voice_profile: voiceProfile,
-              vocal_cue: voiceProfile,
-              trigger_sec: parseTimecodeToSeconds(dlg.trigger_sec ?? (dIdx * 2.0)),
-              duration_sec: parseTimecodeToSeconds(dlg.duration_sec) || Math.max(2.0, Math.round(((spokenLine).split(/\s+/).length * 0.42) * 10) / 10),
-              status: dlg.status || 'done'
-            };
-          })
+      // Normalize dialogue lines (support dialogue, dialogues, lines, speech, and flexible keys)
+      const rawDlgList = Array.isArray(shot.dialogue)
+        ? shot.dialogue
+        : Array.isArray(shot.dialogues)
+        ? shot.dialogues
+        : Array.isArray(shot.lines)
+        ? shot.lines
+        : Array.isArray(shot.speech)
+        ? shot.speech
         : [];
+
+      const dialogue = rawDlgList.map((dlg: any, dIdx: number) => {
+        const speaker = dlg.speaker || dlg.character_ar || dlg.character || "شخصية";
+        const voiceProfile = dlg.voice_profile || dlg.vocal_cue || "narrator";
+        const spokenLine = dlg.line || dlg.line_egyptian || dlg.text || dlg.content || dlg.arabic_line || "";
+
+        return {
+          id: dlg.id || `shot_${shotNum}_dlg_${dIdx + 1}`,
+          character: speaker,
+          character_ar: dlg.character_ar || speaker,
+          speaker,
+          line_original: dlg.line_original || "",
+          line_egyptian: spokenLine,
+          line: spokenLine,
+          voice_model: dlg.voice_model || "ar-EG-ShakirNeural",
+          voice_profile: voiceProfile,
+          vocal_cue: voiceProfile,
+          trigger_sec: parseTimecodeToSeconds(dlg.trigger_sec ?? (dIdx * 2.0)),
+          duration_sec: parseTimecodeToSeconds(dlg.duration_sec) || Math.max(2.0, Math.round(((spokenLine).split(/\s+/).length * 0.42) * 10) / 10),
+          status: dlg.status || 'pending',
+          audio_url: dlg.audio_url || undefined
+        };
+      });
 
       // Normalize SFX (support v18 sfx array or legacy sfx_name)
       let sfxList: any[] = [];

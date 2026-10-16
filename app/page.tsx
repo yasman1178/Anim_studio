@@ -16,8 +16,8 @@ import { SAMPLE_PROJECT_SEIF_V18, NotebookLMProject } from "@/lib/sample-data";
 import { validateNotebookLMJson } from "@/lib/validate-json";
 import { getStorageStats } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
-import { renderMasterProject } from "@/lib/master-renderer";
-import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw } from "lucide-react";
+import { renderMasterProject, runFullAutomatedDubPipeline } from "@/lib/master-renderer";
+import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw, Video, Film, Wand2, Waves } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
 function getActiveTimelineState(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
@@ -108,8 +108,10 @@ export default function AnimeDubStudioPage() {
   const [renderStep, setRenderStep] = useState<string>("");
   const [renderPct, setRenderPct] = useState<number>(0);
   const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
+  const [dubbedVideoUrl, setDubbedVideoUrl] = useState<string | null>(null);
   const [isMasterAudioPlaying, setIsMasterAudioPlaying] = useState<boolean>(false);
   const masterAudioRef = useRef<HTMLAudioElement | null>(null);
+  const [isAutoPipelineRunning, setIsAutoPipelineRunning] = useState<boolean>(false);
 
   // Storage manager modal state & stats
   const [isStorageOpen, setIsStorageOpen] = useState(false);
@@ -195,6 +197,47 @@ export default function AnimeDubStudioPage() {
     currentTime,
     manualVfxType
   );
+
+  // 1-Click Automated Dubbing Pipeline Handler
+  const handleStartAutoPipeline = async () => {
+    setIsAutoPipelineRunning(true);
+    setIsRendering(true);
+    setRenderStep("بدء خط الأنابيب التلقائي: قراءة ملفات الفيديو وسيناريو الجيسون...");
+    setRenderPct(5);
+
+    try {
+      const videoSource = videoUrl || "/sample_anime.mp4";
+      const result = await runFullAutomatedDubPipeline(
+        project,
+        videoSource,
+        (step, pct) => {
+          setRenderStep(step);
+          setRenderPct(pct);
+        }
+      );
+
+      setProject(result.updatedProject);
+      setMasterAudioUrl(result.masterAudioUrl);
+      if (result.dubbedVideoUrl) {
+        setDubbedVideoUrl(result.dubbedVideoUrl);
+        setVideoUrl(result.dubbedVideoUrl);
+      }
+      if (result.instrumentalAudioUrl) {
+        setSeparatedInstUrl(result.instrumentalAudioUrl);
+      }
+      if (result.vocalsAudioUrl) {
+        setSeparatedVocalsUrl(result.vocalsAudioUrl);
+      }
+
+      setRenderFinished(true);
+    } catch (err: any) {
+      console.error("Auto pipeline execution failed:", err);
+      alert("حدث خطأ أثناء تنفيذ خط أنابيب الدبلجة: " + (err?.message || String(err)));
+    } finally {
+      setIsAutoPipelineRunning(false);
+      setIsRendering(false);
+    }
+  };
 
   // Real Master Render Engine: generates missing TTS and mixes all tracks via OfflineAudioContext
   const handleRenderClick = async () => {
@@ -335,6 +378,8 @@ export default function AnimeDubStudioPage() {
                 }}
                 videoUrl={videoUrl}
                 onOpenStorageManager={() => setIsStorageOpen(true)}
+                onStartAutoPipeline={handleStartAutoPipeline}
+                isPipelineRunning={isAutoPipelineRunning}
               />
               <ValidationReport
                 validation={validation}
@@ -455,6 +500,39 @@ export default function AnimeDubStudioPage() {
               </div>
             </div>
 
+            {/* Dubbed Video Preview & Download (if available) */}
+            {dubbedVideoUrl && (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-rose-500/40 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-rose-300 flex items-center gap-1.5">
+                    <Video className="w-3.5 h-3.5 text-rose-400" />
+                    <span>فيديو الدبلجة النهائي المدمج (Dubbed Video MP4):</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-emerald-400 font-semibold">جاهز للتحميل والمشاركة</span>
+                </div>
+
+                <div className="rounded-lg overflow-hidden border border-slate-800 bg-black aspect-video max-h-48 flex items-center justify-center">
+                  <video
+                    src={dubbedVideoUrl}
+                    controls
+                    className="w-full h-full object-contain"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 pt-1">
+                  <a
+                    href={dubbedVideoUrl}
+                    download={`dubbed_video_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.mp4`}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-gradient-to-r from-rose-600 to-pink-600 hover:from-rose-500 hover:to-pink-500 text-white text-xs font-bold transition shadow-md shadow-rose-950 cursor-pointer"
+                    title="تنزيل الفيديو الكامل المدبلج بصيغة MP4"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>تحميل الفيديو المدبلج بالكامل (MP4)</span>
+                  </a>
+                </div>
+              </div>
+            )}
+
             {/* Master Audio Live Player & Download */}
             {masterAudioUrl && (
               <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
@@ -487,7 +565,7 @@ export default function AnimeDubStudioPage() {
                   <a
                     href={masterAudioUrl}
                     download={`master_dubbed_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.wav`}
-                    className="flex items-center gap-1.5 py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                    className="flex items-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-white text-xs font-semibold transition cursor-pointer shrink-0"
                     title="تنزيل ملف الصوت النهائي الخام"
                   >
                     <Download className="w-3.5 h-3.5" />
@@ -504,7 +582,7 @@ export default function AnimeDubStudioPage() {
               </div>
             )}
 
-            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs font-mono">
+            <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 space-y-1.5 text-xs font-mono">
               <div className="flex justify-between text-slate-300">
                 <span>المشروع:</span>
                 <span className="font-sans text-white">{project.project_info.title || project.project_info.anime_title}</span>
@@ -514,12 +592,8 @@ export default function AnimeDubStudioPage() {
                 <span className="text-emerald-400">{totalDuration}s</span>
               </div>
               <div className="flex justify-between text-slate-300">
-                <span>نسبة العرض:</span>
-                <span className="text-slate-200">{aspectRatio}</span>
-              </div>
-              <div className="flex justify-between text-slate-300">
-                <span>المؤثرات الصوتية:</span>
-                <span className="text-amber-400 font-sans">توليد ودمج متزامن في الماستر</span>
+                <span>الموسيقى والمؤثرات:</span>
+                <span className="text-rose-400 font-sans">عزل BGM + دمج أصوات Edge-TTS المتزامنة</span>
               </div>
             </div>
 
