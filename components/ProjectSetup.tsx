@@ -42,19 +42,21 @@ export function ProjectSetup({
     if (!sourceUrl.trim()) return;
     const url = sourceUrl.trim();
     const ytMatch = url.match(/^.*(youtu.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=)([^#&?]*).*/);
+    const projectTotalSec = project.shots.reduce((acc, s) => acc + (Number(s.duration_sec ?? s.duration_seconds) || 5), 0);
+    
     if (ytMatch && ytMatch[2].length === 11) {
-      onVideoSelected(url, 180);
+      onVideoSelected(url, projectTotalSec || 18);
       setUrlStatus('received');
       return;
     }
     const video = document.createElement("video");
     video.src = url;
     video.onloadedmetadata = () => {
-      onVideoSelected(url, video.duration || 180);
+      onVideoSelected(url, video.duration || projectTotalSec || 18);
       setUrlStatus('received');
     };
     video.onerror = () => {
-      onVideoSelected(url, 180);
+      onVideoSelected(url, projectTotalSec || 18);
       setUrlStatus('received');
     };
   };
@@ -266,9 +268,17 @@ export function ProjectSetup({
               </button>
             </div>
             {videoUrl && (
-              <div className="flex items-center gap-1.5 text-[11px] text-emerald-400 pt-0.5">
-                <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                <span>تم ربط الفيديو بنجاح في شاشة المعاينة!</span>
+              <div className="space-y-1 pt-1">
+                <div className="flex items-center gap-1.5 text-[11px] text-emerald-400">
+                  <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                  <span>تم ربط الفيديو بنجاح في شاشة المعاينة!</span>
+                </div>
+                {(videoUrl.includes("youtube.com") || videoUrl.includes("youtu.be")) && (
+                  <div className="p-2 rounded-lg bg-amber-950/40 border border-amber-800/60 text-[11px] text-amber-300 flex items-start gap-1.5 leading-snug">
+                    <span className="font-bold shrink-0">تنبيه:</span>
+                    <span>روابط YouTube للمعاينة البصرية فقط داخل المشغل؛ لمعالجة وفصل الصوت الحقيقي بدقة وتركيب الدبلجة، يرجى رفع ملف الفيديو MP4 من جهازك أدناه.</span>
+                  </div>
+                )}
               </div>
             )}
           </div>

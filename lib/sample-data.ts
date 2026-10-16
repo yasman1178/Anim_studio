@@ -49,6 +49,7 @@ export interface Shot {
   camera_motion?: 'zoom_in' | 'zoom_out' | 'pan_left' | 'pan_right' | 'shake' | 'static' | string;
   transition_out?: 'cut' | 'flash' | 'glitch' | 'fade' | 'whip' | string;
   voiceover_egyptian?: string;
+  voiceover_audio_url?: string;
   dialogue: DialogueLine[];
   beats?: Beat[];
   vfx_spatial_layers?: VfxLayer[];

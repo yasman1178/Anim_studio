@@ -16,7 +16,8 @@ import { SAMPLE_PROJECT_SEIF_V18, NotebookLMProject } from "@/lib/sample-data";
 import { validateNotebookLMJson } from "@/lib/validate-json";
 import { getStorageStats } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
-import { CheckCircle2, Sparkles, MonitorPlay } from "lucide-react";
+import { renderMasterProject } from "@/lib/master-renderer";
+import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
 function getActiveTimelineState(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
@@ -104,6 +105,11 @@ export default function AnimeDubStudioPage() {
   // Render modal state
   const [isRendering, setIsRendering] = useState(false);
   const [renderFinished, setRenderFinished] = useState(false);
+  const [renderStep, setRenderStep] = useState<string>("");
+  const [renderPct, setRenderPct] = useState<number>(0);
+  const [masterAudioUrl, setMasterAudioUrl] = useState<string | null>(null);
+  const [isMasterAudioPlaying, setIsMasterAudioPlaying] = useState<boolean>(false);
+  const masterAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Storage manager modal state & stats
   const [isStorageOpen, setIsStorageOpen] = useState(false);
@@ -190,13 +196,30 @@ export default function AnimeDubStudioPage() {
     manualVfxType
   );
 
-  // Handle render final video simulation
-  const handleRenderClick = () => {
+  // Real Master Render Engine: generates missing TTS and mixes all tracks via OfflineAudioContext
+  const handleRenderClick = async () => {
     setIsRendering(true);
-    setTimeout(() => {
-      setIsRendering(false);
+    setRenderStep("بدء فحص ومزامنة المشروع...");
+    setRenderPct(10);
+
+    try {
+      const result = await renderMasterProject(
+        project,
+        separatedInstUrl,
+        (step, pct) => {
+          setRenderStep(step);
+          setRenderPct(pct);
+        }
+      );
+      setProject(result.updatedProject);
+      setMasterAudioUrl(result.masterAudioUrl);
       setRenderFinished(true);
-    }, 2500);
+    } catch (err: any) {
+      console.error("Render error:", err);
+      alert("حدث خطأ أثناء الإنتاج: " + (err?.message || String(err)));
+    } finally {
+      setIsRendering(false);
+    }
   };
 
   return (
@@ -392,23 +415,96 @@ export default function AnimeDubStudioPage() {
         storageCount={storageStats.count}
       />
 
-      {/* Render Modal Dialog */}
+      {/* Rendering in-progress Overlay */}
+      {isRendering && (
+        <div className="fixed inset-0 z-50 bg-black/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-4">
+          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-6 space-y-4 shadow-2xl text-center">
+            <div className="w-12 h-12 mx-auto rounded-full bg-rose-600/20 border border-rose-500/40 flex items-center justify-center text-rose-500 animate-spin">
+              <RotateCw className="w-6 h-6" />
+            </div>
+            <div className="space-y-1">
+              <h4 className="font-bold text-slate-100 text-sm">جارِ معالجة وتركيب ماستر الدبلجة والمؤثرات...</h4>
+              <p className="text-xs text-rose-300 font-mono">{renderStep || "جاري المعالجة..."}</p>
+            </div>
+            <div className="w-full h-2 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
+              <div
+                className="h-full bg-gradient-to-r from-rose-600 to-cyan-500 transition-all duration-300 rounded-full"
+                style={{ width: `${renderPct}%` }}
+              />
+            </div>
+            <div className="text-[11px] font-mono text-slate-400">
+              {renderPct}% مكتمل · توليد أصوات الحوار الناقصة ودمج المسارات
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Render Finished Modal Dialog */}
       {renderFinished && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
-          <div className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-950 p-5 space-y-4 shadow-2xl">
+          <div className="w-full max-w-lg rounded-2xl border border-slate-800 bg-slate-950 p-5 space-y-4 shadow-2xl">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-full bg-emerald-950/60 border border-emerald-800 flex items-center justify-center text-emerald-400">
                 <CheckCircle2 className="w-5 h-5" />
               </div>
               <div>
-                <h4 className="font-bold text-slate-100 text-sm">اكتمل إنتاج شورتس الأنمي بنجاح!</h4>
+                <h4 className="font-bold text-slate-100 text-sm">اكتمل إنتاج ماستر شورتس الأنمي بنجاح!</h4>
                 <p className="text-xs text-slate-400 mt-0.5">
-                  تم دمج الدبلجة المصرية والمؤثرات الصوتية الفورية ومصفوفة Beats
+                  تم توليد أصوات Edge-TTS الناقصة ودمجها مع BGM والمؤثرات الصوتية بدقة زمنية
                 </p>
               </div>
             </div>
 
-            <div className="p-3.5 rounded-xl bg-slate-900 border border-slate-800 space-y-2 text-xs font-mono">
+            {/* Master Audio Live Player & Download */}
+            {masterAudioUrl && (
+              <div className="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span>معاينة الصوت الماستر المدمج (Master Track):</span>
+                  </span>
+                  <span className="text-[11px] font-mono text-cyan-300">44.1kHz Stereo WAV</span>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!masterAudioRef.current) return;
+                      if (isMasterAudioPlaying) {
+                        masterAudioRef.current.pause();
+                        setIsMasterAudioPlaying(false);
+                      } else {
+                        masterAudioRef.current.play();
+                        setIsMasterAudioPlaying(true);
+                      }
+                    }}
+                    className="flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-100 text-xs font-medium transition cursor-pointer"
+                  >
+                    {isMasterAudioPlaying ? <Pause className="w-4 h-4 text-rose-400" /> : <Play className="w-4 h-4 text-emerald-400" />}
+                    <span>{isMasterAudioPlaying ? "إيقاف مؤقت للاستماع" : "استماع للمسار الصوتي المدمج"}</span>
+                  </button>
+
+                  <a
+                    href={masterAudioUrl}
+                    download={`master_dubbed_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.wav`}
+                    className="flex items-center gap-1.5 py-2 px-3 rounded-lg bg-rose-600 hover:bg-rose-500 text-white text-xs font-semibold transition cursor-pointer shrink-0"
+                    title="تنزيل ملف الصوت النهائي الخام"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>تحميل (WAV)</span>
+                  </a>
+                </div>
+
+                <audio
+                  ref={masterAudioRef}
+                  src={masterAudioUrl}
+                  onEnded={() => setIsMasterAudioPlaying(false)}
+                  className="hidden"
+                />
+              </div>
+            )}
+
+            <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 space-y-2 text-xs font-mono">
               <div className="flex justify-between text-slate-300">
                 <span>المشروع:</span>
                 <span className="font-sans text-white">{project.project_info.title || project.project_info.anime_title}</span>
@@ -423,19 +519,25 @@ export default function AnimeDubStudioPage() {
               </div>
               <div className="flex justify-between text-slate-300">
                 <span>المؤثرات الصوتية:</span>
-                <span className="text-amber-400 font-sans">توليد تلقائي تزامني</span>
+                <span className="text-amber-400 font-sans">توليد ودمج متزامن في الماستر</span>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2 pt-2">
+            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800/80">
               <button
-                onClick={() => setRenderFinished(false)}
+                onClick={() => {
+                  if (masterAudioRef.current) masterAudioRef.current.pause();
+                  setIsMasterAudioPlaying(false);
+                  setRenderFinished(false);
+                }}
                 className="px-3.5 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer min-h-[44px]"
               >
                 إغلاق
               </button>
               <button
                 onClick={() => {
+                  if (masterAudioRef.current) masterAudioRef.current.pause();
+                  setIsMasterAudioPlaying(false);
                   setActiveTab("publishing");
                   setRenderFinished(false);
                 }}

@@ -73,51 +73,41 @@ async function decodeAudioFromMediaBlob(
 ): Promise<AudioBuffer> {
   onProgress?.(15, "قراءة بيانات الملف والتحقق من القنوات...");
 
-  // Attempt 1: Direct AudioContext decode (fastest for WAV/MP3/AAC)
+  // Attempt 1: Direct AudioContext decode (fastest for raw WAV/MP3)
   try {
     const arrayBuffer = await blob.arrayBuffer();
     const copy = arrayBuffer.slice(0);
     const decoded = await audioCtx.decodeAudioData(copy);
     return decoded;
   } catch (directErr) {
-    console.warn("Direct decode failed (likely MP4/WebM video container), attempting audio capture fallback...", directErr);
+    console.warn("Direct AudioContext decode failed (MP4/WebM video container), calling FFmpeg audio extractor...", directErr);
   }
 
-  // Attempt 2: HTMLMediaElement capture fallback for MP4/WebM video containers
-  onProgress?.(25, "استخراج مسار الصوت الرقمي من حاوية الفيديو...");
-  return new Promise<AudioBuffer>((resolve, reject) => {
-    const media = document.createElement("video");
-    media.muted = false;
-    media.src = URL.createObjectURL(blob);
-    media.preload = "auto";
+  // Attempt 2: Real FFmpeg Server Audio Extraction (/api/extract-audio)
+  onProgress?.(30, "استخراج مسار الصوت الحقيقي عبر محرك FFmpeg...");
+  try {
+    const formData = new FormData();
+    const file = new File([blob], "input_video.mp4", { type: blob.type || "video/mp4" });
+    formData.append("file", file);
 
-    media.onloadedmetadata = async () => {
-      try {
-        const duration = Math.min(media.duration || 10, 180); // Cap at 3 minutes for browser memory
-        const sampleRate = audioCtx.sampleRate || 44100;
-        const offlineCtx = new (window.OfflineAudioContext || (window as any).webkitOfflineAudioContext)(
-          2,
-          Math.ceil(duration * sampleRate),
-          sampleRate
-        );
+    const res = await fetch("/api/extract-audio", {
+      method: "POST",
+      body: formData,
+    });
 
-        // Fetch as array buffer and decode in offline context
-        const res = await fetch(media.src);
-        const ab = await res.arrayBuffer();
-        const buffer = await offlineCtx.decodeAudioData(ab);
-        URL.revokeObjectURL(media.src);
-        resolve(buffer);
-      } catch (err) {
-        URL.revokeObjectURL(media.src);
-        reject(new Error("تعذر فك تشفير الصوت من ملف الفيديو: " + String(err)));
-      }
-    };
+    if (!res.ok) {
+      const errJson = await res.json().catch(() => ({}));
+      throw new Error(errJson.error || `خطأ استخراج الصوت: HTTP ${res.status}`);
+    }
 
-    media.onerror = () => {
-      URL.revokeObjectURL(media.src);
-      reject(new Error("صيغة ملف الفيديو غير مدعومة في المتصفح"));
-    };
-  });
+    onProgress?.(45, "فك تشفير موجات WAV المستخرجة في الذاكرة...");
+    const wavArrayBuffer = await res.arrayBuffer();
+    const decodedBuffer = await audioCtx.decodeAudioData(wavArrayBuffer);
+    return decodedBuffer;
+  } catch (ffmpegErr: any) {
+    console.error("FFmpeg extraction failed:", ffmpegErr);
+    throw new Error("تعذر فك تشفير الصوت من ملف الفيديو: " + (ffmpegErr?.message || String(ffmpegErr)));
+  }
 }
 
 /**

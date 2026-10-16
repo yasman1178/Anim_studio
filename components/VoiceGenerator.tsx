@@ -10,6 +10,36 @@ interface VoiceGeneratorProps {
   onUpdateProject: (updated: NotebookLMProject) => void;
 }
 
+function resolveVoiceSettings(speaker?: string, charKey?: string, voiceModel?: string, vocalCue?: string) {
+  const norm = `${speaker || ''} ${charKey || ''} ${vocalCue || ''}`.toLowerCase();
+  if (norm.includes('سارة') || norm.includes('sara') || norm.includes('salma')) {
+    return {
+      voice: 'ar-EG-SalmaNeural',
+      pitch: '+2Hz',
+      rate: '+4%'
+    };
+  }
+  if (norm.includes('كمال') || norm.includes('kamal') || norm.includes('beast') || norm.includes('وحش') || norm.includes('وحوش')) {
+    return {
+      voice: 'ar-SA-HamedNeural',
+      pitch: '-15Hz',
+      rate: '-5%'
+    };
+  }
+  if (norm.includes('نظام') || norm.includes('system')) {
+    return {
+      voice: 'ar-AE-HamdanNeural',
+      pitch: '-5Hz',
+      rate: '-5%'
+    };
+  }
+  return {
+    voice: voiceModel || 'ar-EG-ShakirNeural',
+    pitch: '+0Hz',
+    rate: '+6%'
+  };
+}
+
 export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps) {
   const [isGeneratingAll, setIsGeneratingAll] = useState(false);
   const [progressCount, setProgressCount] = useState(0);
@@ -17,22 +47,7 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
   const [activeGeneratingId, setActiveGeneratingId] = useState<string | null>(null);
   const [playingAudioId, setPlayingAudioId] = useState<string | null>(null);
   const [audioElement, setAudioElement] = useState<HTMLAudioElement | null>(null);
-
-  // Native Speech Synthesis Fallback
-  const speakNative = (text: string, id: string) => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const cleaned = text.replace(/\([^)]*\)/g, "").replace(/\[[^\]]*\]/g, "").trim();
-    const utterance = new SpeechSynthesisUtterance(cleaned);
-    utterance.lang = "ar-EG";
-    const voices = window.speechSynthesis.getVoices();
-    const arVoice = voices.find(v => v.lang.startsWith("ar")) || voices[0];
-    if (arVoice) utterance.voice = arVoice;
-    utterance.onend = () => setPlayingAudioId(null);
-    utterance.onerror = () => setPlayingAudioId(null);
-    setPlayingAudioId(id);
-    window.speechSynthesis.speak(utterance);
-  };
+  const [ttsError, setTtsError] = useState<string | null>(null);
 
   // Generate single line audio via /api/tts
   const generateLineVoice = async (shotIndex: number, lineIndex: number) => {
@@ -42,17 +57,14 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
     const lineId = line.id || `shot_${shotIndex + 1}_dlg_${lineIndex + 1}`;
     setActiveGeneratingId(lineId);
+    setTtsError(null);
 
     const spokenText = line.line || line.line_egyptian || "";
 
     try {
       const vocalCue = line.voice_profile || line.vocal_cue || shot.vocal_cue || "narrator";
       const charKey = line.character || line.speaker || "seif";
-      const charMapping = project.character_voice_mapping?.[charKey] || {
-        voice_name: line.voice_model || "ar-EG-ShakirNeural",
-        pitch: "+0Hz",
-        rate: "+0%"
-      };
+      const voiceSettings = resolveVoiceSettings(line.speaker, charKey, line.voice_model, vocalCue);
 
       const res = await fetch("/api/tts", {
         method: "POST",
@@ -60,9 +72,9 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         body: JSON.stringify({
           text: spokenText,
           vocal_cue: vocalCue,
-          voice: charMapping.voice_name || line.voice_model,
-          pitch: charMapping.pitch,
-          rate: charMapping.rate
+          voice: voiceSettings.voice,
+          pitch: voiceSettings.pitch,
+          rate: voiceSettings.rate
         })
       });
 
@@ -88,12 +100,11 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         // Auto play generated audio
         playAudio(lineId, data.audio_url, spokenText);
       } else {
-        // Fallback to native speech
-        speakNative(spokenText, lineId);
+        setTtsError(`فشل توليد صوت ${line.speaker || 'الشخصية'} عبر خادم Edge-TTS: ${data?.error || "خطأ غير معروف في الخادم"}`);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error("TTS generation error:", err);
-      speakNative(spokenText, lineId);
+      setTtsError(`تعذر الاتصال بخادم Edge-TTS: ${err?.message || String(err)}`);
     } finally {
       setActiveGeneratingId(null);
     }
@@ -106,6 +117,7 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
     const voId = `vo_${shot.shot_number}`;
     setActiveGeneratingId(voId);
+    setTtsError(null);
 
     try {
       const vocalCue = shot.vocal_cue || "narrator";
@@ -114,12 +126,22 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           text: shot.voiceover_egyptian,
-          vocal_cue: vocalCue
+          vocal_cue: vocalCue,
+          voice: "ar-EG-ShakirNeural",
+          pitch: "+0Hz",
+          rate: "+8%"
         })
       });
 
       const data = await res.json();
       if (data.success && data.audio_url) {
+        const updatedProject = { ...project };
+        updatedProject.shots[shotIndex] = {
+          ...updatedProject.shots[shotIndex],
+          voiceover_audio_url: data.audio_url
+        };
+        onUpdateProject(updatedProject);
+
         saveAudioUrlAsset(
           data.audio_url,
           `صوت الراوي - لقطة ${shotIndex + 1}.mp3`,
@@ -128,26 +150,72 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
         );
         playAudio(voId, data.audio_url, shot.voiceover_egyptian);
       } else {
-        speakNative(shot.voiceover_egyptian, voId);
+        setTtsError(`فشل توليد صوت الراوي عبر خادم Edge-TTS: ${data?.error || "خطأ في السيرفر"}`);
       }
-    } catch {
-      speakNative(shot.voiceover_egyptian, voId);
+    } catch (err: any) {
+      console.error("Voiceover TTS error:", err);
+      setTtsError(`تعذر الاتصال بخادم Edge-TTS لتوليد صوت الراوي: ${err?.message || String(err)}`);
     } finally {
       setActiveGeneratingId(null);
     }
   };
 
-  // Generate all lines sequentially
+  // Generate all lines sequentially (both voiceovers and dialogues)
   const generateAllVoices = async () => {
     setIsGeneratingAll(true);
+    setTtsError(null);
     let count = 0;
-    const total = project.shots.reduce((acc, s) => acc + s.dialogue.length, 0);
+    
+    // Total count of voiceovers + dialogues
+    const total = project.shots.reduce((acc, s) => acc + (s.voiceover_egyptian ? 1 : 0) + s.dialogue.length, 0);
     setTotalLinesCount(total);
     setProgressCount(0);
 
     const updatedProject = { ...project };
     for (let sIdx = 0; sIdx < updatedProject.shots.length; sIdx++) {
       const shot = updatedProject.shots[sIdx];
+
+      // 1. Generate Voiceover for this shot if present
+      if (shot.voiceover_egyptian) {
+        const voId = `vo_${shot.shot_number}`;
+        setActiveGeneratingId(voId);
+        try {
+          const res = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              text: shot.voiceover_egyptian,
+              vocal_cue: shot.vocal_cue || "narrator",
+              voice: "ar-EG-ShakirNeural",
+              pitch: "+0Hz",
+              rate: "+8%"
+            })
+          });
+          const data = await res.json();
+          if (data.success && data.audio_url) {
+            updatedProject.shots[sIdx] = {
+              ...updatedProject.shots[sIdx],
+              voiceover_audio_url: data.audio_url
+            };
+            onUpdateProject({ ...updatedProject });
+            saveAudioUrlAsset(
+              data.audio_url,
+              `صوت الراوي - لقطة ${sIdx + 1}.mp3`,
+              'tts_audio',
+              { shotIndex: sIdx, role: 'الراوي', duration: data.duration_seconds }
+            );
+          } else {
+            setTtsError(`فشل توليد صوت الراوي في لقطة #${shot.shot_number}: ${data.error || 'خطأ في خادم Edge-TTS'}`);
+          }
+        } catch (e: any) {
+          console.error("Error generating voiceover:", e);
+          setTtsError(`فشل الاتصال بخادم Edge-TTS لتوليد صوت الراوي: ${e?.message || String(e)}`);
+        }
+        count++;
+        setProgressCount(count);
+      }
+
+      // 2. Generate each Dialogue line for this shot
       for (let dIdx = 0; dIdx < shot.dialogue.length; dIdx++) {
         const line = shot.dialogue[dIdx];
         const lineId = line.id || `shot_${sIdx + 1}_dlg_${dIdx + 1}`;
@@ -155,12 +223,7 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
         try {
           const charKey = line.character || line.speaker || "seif";
-          const vocalCue = line.voice_profile || line.vocal_cue || shot.vocal_cue || "narrator";
-          const charMapping = project.character_voice_mapping?.[charKey] || {
-            voice_name: line.voice_model || "ar-EG-ShakirNeural",
-            pitch: "+0Hz",
-            rate: "+0%"
-          };
+          const voiceSettings = resolveVoiceSettings(line.speaker, charKey, line.voice_model, line.vocal_cue || shot.vocal_cue);
           const spokenText = line.line || line.line_egyptian || "";
 
           const res = await fetch("/api/tts", {
@@ -168,10 +231,10 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               text: spokenText,
-              vocal_cue: vocalCue,
-              voice: charMapping.voice_name || line.voice_model,
-              pitch: charMapping.pitch,
-              rate: charMapping.rate
+              vocal_cue: line.voice_profile || line.vocal_cue || shot.vocal_cue || "narrator",
+              voice: voiceSettings.voice,
+              pitch: voiceSettings.pitch,
+              rate: voiceSettings.rate
             })
           });
 
@@ -187,13 +250,16 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
 
             saveAudioUrlAsset(
               data.audio_url,
-              `دبلجة [${charKey}] - لقطة ${sIdx + 1}.mp3`,
+              `دبلجة [${line.speaker || charKey}] - لقطة ${sIdx + 1}.mp3`,
               'tts_audio',
-              { shotIndex: sIdx, role: charKey, duration: data.duration_seconds }
+              { shotIndex: sIdx, role: line.speaker || charKey, duration: data.duration_seconds }
             );
+          } else {
+            setTtsError(`فشل توليد صوت الحوار في لقطة #${shot.shot_number}: ${data.error || 'خطأ في خادم Edge-TTS'}`);
           }
-        } catch (e) {
+        } catch (e: any) {
           console.error("Error generating for line:", lineId, e);
+          setTtsError(`فشل الاتصال بخادم Edge-TTS: ${e?.message || String(e)}`);
         }
 
         count++;
@@ -208,9 +274,6 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
   const playAudio = (id: string, url?: string, fallbackText?: string) => {
     if (playingAudioId === id) {
       audioElement?.pause();
-      if (typeof window !== "undefined" && window.speechSynthesis) {
-        window.speechSynthesis.cancel();
-      }
       setPlayingAudioId(null);
       return;
     }
@@ -221,16 +284,19 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
       const audio = new Audio(url);
       audio.onended = () => setPlayingAudioId(null);
       audio.onerror = () => {
-        if (fallbackText) speakNative(fallbackText, id);
+        setTtsError("تعذر تشغيل المقطع الصوتي، قد يكون الرابط منتهي الصلاحية.");
+        setPlayingAudioId(null);
       };
       audio.play().then(() => {
         setAudioElement(audio);
         setPlayingAudioId(id);
-      }).catch(() => {
-        if (fallbackText) speakNative(fallbackText, id);
+      }).catch((e) => {
+        console.error("Audio playback error:", e);
+        setTtsError("تعذر تشغيل المقطع في المتصفح. تأكد من تفعيل أذونات الصوت.");
+        setPlayingAudioId(null);
       });
-    } else if (fallbackText) {
-      speakNative(fallbackText, id);
+    } else {
+      setTtsError("لم يتم توليد ملف صوتي لهذا المقطع بعد. انقر على «نطق فوري» لتوليده عبر Edge-TTS.");
     }
   };
 
@@ -261,11 +327,28 @@ export function VoiceGenerator({ project, onUpdateProject }: VoiceGeneratorProps
           ) : (
             <>
               <Sparkles className="w-3.5 h-3.5" />
-              <span>توليد كل أصوات الحوار دفعة واحدة</span>
+              <span>توليد كل أصوات الحوار والراوي دفعة واحدة</span>
             </>
           )}
         </button>
       </div>
+
+      {/* Explicit TTS Error Notice */}
+      {ttsError && (
+        <div className="p-3 bg-rose-950/80 border border-rose-600/60 rounded-xl text-rose-200 text-xs flex items-center justify-between gap-3 animate-in fade-in">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>{ttsError}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setTtsError(null)}
+            className="text-rose-400 hover:text-rose-200 text-xs font-bold px-2 py-0.5 rounded cursor-pointer"
+          >
+            إغلاق
+          </button>
+        </div>
+      )}
 
       {/* Character Voice Mapping Config */}
       <div className="p-3.5 rounded-lg bg-slate-950/60 border border-slate-800 space-y-2">

@@ -25,10 +25,10 @@ export function VocalSeparator({
 
   // Playback & Mixer state
   const [isPlaying, setIsPlaying] = useState(false);
-  const [abMode, setAbMode] = useState<'original' | 'instrumental' | 'vocals'>('instrumental');
-  const [dialogueVolume, setDialogueVolume] = useState(0.2); // lowered original dialogue
+  const [abMode, setAbMode] = useState<'original' | 'instrumental' | 'vocals'>('original');
+  const [dialogueVolume, setDialogueVolume] = useState(0.8);
   const [musicVolume, setMusicVolume] = useState(1.0);
-  const [isDialogueMuted, setIsDialogueMuted] = useState(true); // default mute original dialogue as per dubbing spec
+  const [isDialogueMuted, setIsDialogueMuted] = useState(false); // unmuted by default so user hears sound immediately
 
   // Audio elements
   const originalAudioRef = useRef<HTMLAudioElement | null>(null);
