@@ -13,9 +13,11 @@ interface VideoCanvasProps {
   currentBeat?: string | null;
   videoUrl?: string | null;
   currentTime: number;
+  seekTargetTime?: number | null;
   isPlaying: boolean;
   onTimeUpdate?: (time: number) => void;
   onDurationChange?: (dur: number) => void;
+  onEnded?: () => void;
 }
 
 export function VideoCanvas({
@@ -28,21 +30,23 @@ export function VideoCanvas({
   currentBeat,
   videoUrl,
   currentTime,
+  seekTargetTime,
   isPlaying,
   onTimeUpdate,
-  onDurationChange
+  onDurationChange,
+  onEnded
 }: VideoCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
-  // Sync external currentTime with video element
+  // Single-source seeking: only update video.currentTime when an explicit user seek occurs
   useEffect(() => {
-    if (videoRef.current && Math.abs(videoRef.current.currentTime - currentTime) > 0.4) {
-      videoRef.current.currentTime = currentTime;
+    if (seekTargetTime !== undefined && seekTargetTime !== null && videoRef.current) {
+      videoRef.current.currentTime = seekTargetTime;
     }
-  }, [currentTime]);
+  }, [seekTargetTime]);
 
-  // Sync play/pause with video element
+  // Sync play/pause with video element smoothly
   useEffect(() => {
     if (!videoRef.current) return;
     if (isPlaying) {
@@ -281,6 +285,7 @@ export function VideoCanvas({
                 muted={true}
                 onTimeUpdate={(e) => onTimeUpdate?.(e.currentTarget.currentTime)}
                 onLoadedMetadata={(e) => onDurationChange?.(e.currentTarget.duration)}
+                onEnded={() => onEnded?.()}
               />
             );
           })()}

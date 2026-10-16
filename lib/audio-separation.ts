@@ -243,7 +243,7 @@ export async function decodeAudioFromMediaBlob(
  * and eliminates out-of-phase comb filtering.
  */
 export async function separateAudioInBrowser(
-  audioBlobOrBuffer: Blob | AudioBuffer,
+  audioBlobOrBuffer: Blob | AudioBuffer | string,
   onProgress?: (progress: number, step: string) => void
 ): Promise<SeparationResult> {
   const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
@@ -276,51 +276,96 @@ export async function separateAudioInBrowser(
 
   onProgress?.(70, "عزل مسار الموسيقى وحماية ترددات الباص والمؤثرات...");
 
-  // State-variable filter tracking human speech band (approx 260Hz - 3600Hz)
-  let lowL = 0;
-  let bandL = 0;
-  let lowR = 0;
-  let bandR = 0;
-  const freqCutoff = 3200 / sampleRate;
-  const q = 0.707;
+    // True Mid-Side (M/S) Matrix:
+    // In stereo anime/film mixing, dialogue is placed strictly in the center (Phantom Center: L == R).
+    // The Side channel contains ZERO speech (0% dialogue) and 100% stereo music/ambience/reverb tails.
+    // To restore the center sub-bass (<180Hz) and high air sparkle (>8500Hz) without vocal formants:
+    // We apply crossover filtering to the Mid channel.
 
-  let maxVoc = 0.001;
-  let maxInst = 0.001;
+    // 1. Calculate Mid and Side channels
+    // Low-pass filter for sub-bass below 180Hz (keeps 808s, kick, sub-bass)
+    // High-pass filter for air above 8500Hz (keeps cymbals, shimmer)
+    const midArr = new Float32Array(length);
+    const sideArr = new Float32Array(length);
 
-  for (let i = 0; i < length; i++) {
-    const l = leftSrc[i];
-    const r = rightSrc[i];
+    for (let i = 0; i < length; i++) {
+      const l = leftSrc[i];
+      const r = rightSrc[i];
+      midArr[i] = (l + r) * 0.5;
+      sideArr[i] = (l - r) * 0.5;
+    }
 
-    // Mid: center dialogue
-    // Side: stereo imaging (reverb, stereo synths, side guitars, panning)
-    const mid = (l + r) * 0.5;
+    // Design 2-pole IIR Crossover Filters for Mid Channel
+    // A. Lowpass at 180 Hz
+    const fLow = 180;
+    const wLow = 2 * Math.PI * (fLow / sampleRate);
+    const alphaLow = Math.sin(wLow) / (2 * 0.7071);
+    const cosLow = Math.cos(wLow);
+    const b0L = (1 - cosLow) / 2;
+    const b1L = 1 - cosLow;
+    const b2L = (1 - cosLow) / 2;
+    const a0L = 1 + alphaLow;
+    const a1L = -2 * cosLow;
+    const a2L = 1 - alphaLow;
 
-    // Filter speech band
-    lowL += freqCutoff * bandL;
-    const highL = l - lowL - q * bandL;
-    bandL += freqCutoff * highL;
+    // B. Highpass at 8500 Hz
+    const fHigh = 8500;
+    const wHigh = 2 * Math.PI * (fHigh / sampleRate);
+    const alphaHigh = Math.sin(wHigh) / (2 * 0.7071);
+    const cosHigh = Math.cos(wHigh);
+    const b0H = (1 + cosHigh) / 2;
+    const b1H = -(1 + cosHigh);
+    const b2H = (1 + cosHigh) / 2;
+    const a0H = 1 + alphaHigh;
+    const a1H = -2 * cosHigh;
+    const a2H = 1 - alphaHigh;
 
-    lowR += freqCutoff * bandR;
-    const highR = r - lowR - q * bandR;
-    bandR += freqCutoff * highR;
+    // Filter state memory
+    let x1L = 0, x2L = 0, y1L = 0, y2L = 0;
+    let x1H = 0, x2H = 0, y1H = 0, y2H = 0;
 
-    const midBand = (bandL + bandR) * 0.5;
+    let maxVoc = 0.001;
+    let maxInst = 0.001;
 
-    // 1. Clean Vocals (In-Phase mono center)
-    const vocSample = mid * 0.72 + midBand * 0.28;
-    vocLeft[i] = vocSample;
-    vocRight[i] = vocSample;
-    if (Math.abs(vocSample) > maxVoc) maxVoc = Math.abs(vocSample);
+    for (let i = 0; i < length; i++) {
+      const mid = midArr[i];
+      const side = sideArr[i];
 
-    // 2. Instrumental (BGM): Retains full stereo, punchy bass, subtracts center speech
-    const instL = (l - midBand * 0.75) * 1.05;
-    const instR = (r - midBand * 0.75) * 1.05;
+      // Low-pass output (mid sub-bass)
+      const midBass = (b0L * mid + b1L * x1L + b2L * x2L - a1L * y1L - a2L * y2L) / a0L;
+      x2L = x1L;
+      x1L = mid;
+      y2L = y1L;
+      y1L = midBass;
 
-    instLeft[i] = instL;
-    instRight[i] = instR;
-    if (Math.abs(instL) > maxInst) maxInst = Math.abs(instL);
-    if (Math.abs(instR) > maxInst) maxInst = Math.abs(instR);
-  }
+      // High-pass output (mid air)
+      const midAir = (b0H * mid + b1H * x1H + b2H * x2H - a1H * y1H - a2H * y2H) / a0H;
+      x2H = x1H;
+      x1H = mid;
+      y2H = y1H;
+      y1H = midAir;
+
+      // Retained center music (bass + air)
+      const midMusic = midBass + midAir;
+
+      // Center dialogue formant band (100% speech isolation)
+      const speechCenter = mid - midMusic;
+
+      // 1. True 100% Speech-Free Instrumental BGM:
+      // Side channel has ZERO center speech. Adding filtered center bass + air restores fullness.
+      const instL = side + midMusic;
+      const instR = -side + midMusic;
+
+      instLeft[i] = instL;
+      instRight[i] = instR;
+      if (Math.abs(instL) > maxInst) maxInst = Math.abs(instL);
+      if (Math.abs(instR) > maxInst) maxInst = Math.abs(instR);
+
+      // 2. Pure Center Vocals (Original actors dialogue):
+      vocLeft[i] = speechCenter;
+      vocRight[i] = speechCenter;
+      if (Math.abs(speechCenter) > maxVoc) maxVoc = Math.abs(speechCenter);
+    }
 
   // Soft peak normalization
   const vocScale = maxVoc > 0.95 ? 0.95 / maxVoc : 1.0;

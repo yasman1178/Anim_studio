@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, useMemo } from "react";
+import React, { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { TopBar } from "@/components/TopBar";
 import { BottomNav } from "@/components/BottomNav";
 import { ProjectSetup } from "@/components/ProjectSetup";
@@ -18,7 +18,8 @@ import { getStorageStats } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
 import { renderMasterProject, runFullAutomatedDubPipeline } from "@/lib/master-renderer";
 import { muxVideoWithAudioInBrowser } from "@/lib/browser-video-muxer";
-import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw, Video, Film, Wand2, Waves } from "lucide-react";
+import { separateAudioInBrowser } from "@/lib/audio-separation";
+import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw, Video, Film, Wand2, Waves, Check } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
 function getActiveTimelineState(shots: NotebookLMProject['shots'], currentTime: number, manualVfx: string | null) {
@@ -100,6 +101,10 @@ export default function AnimeDubStudioPage() {
   const [aspectRatio, setAspectRatio] = useState<'16:9' | '9:16'>('9:16');
   const [manualVfxType, setManualVfxType] = useState<string | null>("dark_purple_shadow_aura");
 
+  // Seeking coordination between UI and Hardware Video element
+  const [seekTargetTime, setSeekTargetTime] = useState<number | null>(null);
+  const [syncAlert, setSyncAlert] = useState<string | null>(null);
+
   // Track triggered SFX and Dialogue lines during playback to prevent repeated hits
   const triggeredSfxRef = useRef<Set<string>>(new Set());
   const triggeredDialogueRef = useRef<Set<string>>(new Set());
@@ -144,10 +149,155 @@ export default function AnimeDubStudioPage() {
   // Synchronized playback timer
   const totalDuration = validation?.calculated_total_duration || 17.0;
 
-  // Real-time SFX, Character Dialogue, and timeline synchronization
+  // Reusable trigger processor for SFX & character dialogues
+  const checkAudioTriggers = useCallback((nextTime: number) => {
+    let accTime = 0;
+    for (const shot of project.shots) {
+      const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
+      const shotStart = accTime;
+      const shotEnd = shotStart + dur;
+
+      if (nextTime >= shotStart && nextTime <= shotEnd) {
+        // 1. Play SFX
+        const sfxList = Array.isArray(shot.sound_design?.sfx)
+          ? shot.sound_design.sfx
+          : shot.sound_design?.sfx_name
+          ? [{ sfx_name: shot.sound_design.sfx_name, sfx_trigger_sec: shot.sound_design.sfx_trigger_sec || 0, sfx_volume_percent: 80 }]
+          : [];
+
+        sfxList.forEach((sfx, sIdx) => {
+          const sfxKey = `shot_${shot.shot_number}_sfx_${sIdx}_${sfx.sfx_name}`;
+          const triggerAt = shotStart + (sfx.sfx_trigger_sec || 0);
+
+          if (Math.abs(nextTime - triggerAt) <= 0.25 && !triggeredSfxRef.current.has(sfxKey)) {
+            triggeredSfxRef.current.add(sfxKey);
+            playSfx(sfx.sfx_name, sfx.sfx_volume_percent || 80);
+          }
+        });
+
+        // 2. Play active character dialogue audio line
+        (shot.dialogue || []).forEach((dlg, dIdx) => {
+          const dlgKey = `shot_${shot.shot_number}_dlg_${dIdx}`;
+          const triggerAt = shotStart + (dlg.trigger_sec || 0);
+
+          if (Math.abs(nextTime - triggerAt) <= 0.25 && !triggeredDialogueRef.current.has(dlgKey)) {
+            triggeredDialogueRef.current.add(dlgKey);
+            if (dlg.audio_url) {
+              try {
+                if (activeDialogueAudioRef.current) {
+                  activeDialogueAudioRef.current.pause();
+                }
+                const audio = new Audio(dlg.audio_url);
+                activeDialogueAudioRef.current = audio;
+                audio.play().catch(() => {});
+              } catch {}
+            }
+          }
+        });
+
+        // 3. Play voiceover if present
+        if (shot.voiceover_audio_url) {
+          const voKey = `shot_${shot.shot_number}_vo`;
+          if (Math.abs(nextTime - shotStart) <= 0.25 && !triggeredDialogueRef.current.has(voKey)) {
+            triggeredDialogueRef.current.add(voKey);
+            try {
+              if (activeDialogueAudioRef.current) {
+                activeDialogueAudioRef.current.pause();
+              }
+              const audio = new Audio(shot.voiceover_audio_url);
+              activeDialogueAudioRef.current = audio;
+              audio.play().catch(() => {});
+            } catch {}
+          }
+        }
+
+        break;
+      }
+      accTime = shotEnd;
+    }
+  }, [project.shots]);
+
+  // Hardware Video Clock update callback: called directly by HTMLVideoElement without setInterval collision
+  const handleVideoTimeUpdate = (time: number) => {
+    setCurrentTime(time);
+    checkAudioTriggers(time);
+    if (time >= totalDuration) {
+      setIsPlaying(false);
+      triggeredSfxRef.current.clear();
+      triggeredDialogueRef.current.clear();
+    }
+  };
+
+  // User-initiated seek handler (scrubbing timeline or jumping)
+  const handleSeek = (time: number) => {
+    const clamped = Math.max(0, Math.min(totalDuration, time));
+    setCurrentTime(clamped);
+    setSeekTargetTime(clamped);
+    triggeredSfxRef.current.clear();
+    triggeredDialogueRef.current.clear();
+    if (activeDialogueAudioRef.current) {
+      activeDialogueAudioRef.current.pause();
+    }
+  };
+
+  // Playback ended handler
+  const handlePlaybackEnded = () => {
+    setIsPlaying(false);
+    setCurrentTime(0);
+    setSeekTargetTime(0);
+    triggeredSfxRef.current.clear();
+    triggeredDialogueRef.current.clear();
+  };
+
+  // Automatic Proportional Duration Alignment: scales shot durations when real video duration is read
+  const handleVideoDurationChange = (vidDur: number) => {
+    if (!vidDur || isNaN(vidDur) || vidDur <= 0) return;
+    setVideoDuration(vidDur);
+
+    const currentTotal = project.shots.reduce(
+      (acc, s) => acc + (Number(s.duration_sec ?? s.duration_seconds) || 5),
+      0
+    );
+
+    // If video duration differs from current scenario duration by more than 0.25s
+    if (currentTotal > 0 && Math.abs(vidDur - currentTotal) > 0.25) {
+      const scale = vidDur / currentTotal;
+      const scaledShots = project.shots.map((shot) => {
+        const oldDur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
+        const newDur = Math.round((oldDur * scale) * 100) / 100;
+
+        return {
+          ...shot,
+          duration_sec: newDur,
+          duration_seconds: newDur,
+          dialogue: (shot.dialogue || []).map((d) => ({
+            ...d,
+            trigger_sec: Math.round(((d.trigger_sec || 0) * scale) * 100) / 100,
+          })),
+          sound_design: shot.sound_design ? {
+            ...shot.sound_design,
+            sfx_trigger_sec: Math.round(((shot.sound_design.sfx_trigger_sec || 0) * scale) * 100) / 100,
+            sfx: Array.isArray(shot.sound_design.sfx) ? shot.sound_design.sfx.map(s => ({
+              ...s,
+              sfx_trigger_sec: Math.round(((s.sfx_trigger_sec || 0) * scale) * 100) / 100,
+            })) : shot.sound_design.sfx
+          } : shot.sound_design
+        };
+      });
+
+      setProject((prev) => ({
+        ...prev,
+        shots: scaledShots
+      }));
+      setSyncAlert(`تمت مواءمة مدة لقطات الخط الزمني بالتناسب (${vidDur.toFixed(1)} ثانية) لتطابق مدة الفيديو الفعلي 100%.`);
+      setTimeout(() => setSyncAlert(null), 6000);
+    }
+  };
+
+  // Fallback playback timer: strictly only active when NO video is loaded (pure storyboard preview mode)
   useEffect(() => {
     let interval: NodeJS.Timeout;
-    if (isPlaying) {
+    if (isPlaying && !videoUrl) {
       interval = setInterval(() => {
         setCurrentTime((prev) => {
           if (prev >= totalDuration) {
@@ -157,77 +307,11 @@ export default function AnimeDubStudioPage() {
             return 0;
           }
           const nextTime = Math.round((prev + 0.1) * 10) / 10;
-
-          // Check SFX & Dialogue triggers in active shot
-          let accTime = 0;
-          for (const shot of project.shots) {
-            const dur = Number(shot.duration_sec ?? shot.duration_seconds) || 5;
-            const shotStart = accTime;
-            const shotEnd = shotStart + dur;
-
-            if (nextTime >= shotStart && nextTime <= shotEnd) {
-              // 1. Play SFX
-              const sfxList = Array.isArray(shot.sound_design?.sfx)
-                ? shot.sound_design.sfx
-                : shot.sound_design?.sfx_name
-                ? [{ sfx_name: shot.sound_design.sfx_name, sfx_trigger_sec: shot.sound_design.sfx_trigger_sec || 0, sfx_volume_percent: 80 }]
-                : [];
-
-              sfxList.forEach((sfx, sIdx) => {
-                const sfxKey = `shot_${shot.shot_number}_sfx_${sIdx}_${sfx.sfx_name}`;
-                const triggerAt = shotStart + (sfx.sfx_trigger_sec || 0);
-
-                if (Math.abs(nextTime - triggerAt) <= 0.15 && !triggeredSfxRef.current.has(sfxKey)) {
-                  triggeredSfxRef.current.add(sfxKey);
-                  playSfx(sfx.sfx_name, sfx.sfx_volume_percent || 80);
-                }
-              });
-
-              // 2. Play active character dialogue audio line
-              (shot.dialogue || []).forEach((dlg, dIdx) => {
-                const dlgKey = `shot_${shot.shot_number}_dlg_${dIdx}`;
-                const triggerAt = shotStart + (dlg.trigger_sec || 0);
-
-                if (Math.abs(nextTime - triggerAt) <= 0.15 && !triggeredDialogueRef.current.has(dlgKey)) {
-                  triggeredDialogueRef.current.add(dlgKey);
-                  if (dlg.audio_url) {
-                    try {
-                      if (activeDialogueAudioRef.current) {
-                        activeDialogueAudioRef.current.pause();
-                      }
-                      const audio = new Audio(dlg.audio_url);
-                      activeDialogueAudioRef.current = audio;
-                      audio.play().catch(() => {});
-                    } catch {}
-                  }
-                }
-              });
-
-              // 3. Play voiceover if present
-              if (shot.voiceover_audio_url) {
-                const voKey = `shot_${shot.shot_number}_vo`;
-                if (Math.abs(nextTime - shotStart) <= 0.15 && !triggeredDialogueRef.current.has(voKey)) {
-                  triggeredDialogueRef.current.add(voKey);
-                  try {
-                    if (activeDialogueAudioRef.current) {
-                      activeDialogueAudioRef.current.pause();
-                    }
-                    const audio = new Audio(shot.voiceover_audio_url);
-                    activeDialogueAudioRef.current = audio;
-                    audio.play().catch(() => {});
-                  } catch {}
-                }
-              }
-
-              break;
-            }
-            accTime = shotEnd;
-          }
-
+          checkAudioTriggers(nextTime);
           return nextTime;
         });
       }, 100);
-    } else {
+    } else if (!isPlaying) {
       triggeredSfxRef.current.clear();
       triggeredDialogueRef.current.clear();
       if (activeDialogueAudioRef.current) {
@@ -235,7 +319,7 @@ export default function AnimeDubStudioPage() {
       }
     }
     return () => clearInterval(interval);
-  }, [isPlaying, totalDuration, project.shots]);
+  }, [isPlaying, videoUrl, totalDuration, checkAudioTriggers]);
 
   // Derive active states
   const { activeTextOverlay, activeVoiceover, activeVfxType, currentBeat, cameraMotion } = getActiveTimelineState(
@@ -292,10 +376,30 @@ export default function AnimeDubStudioPage() {
     setRenderPct(10);
 
     try {
-      // 1. Render all dialogue and synthesize master multi-track audio
+      // 1. Ensure clean speech-free instrumental background track exists
+      let instUrl = separatedInstUrl;
+      const targetVideoUrl = videoUrl || "/sample_anime.mp4";
+
+      if (!instUrl && targetVideoUrl) {
+        setRenderStep("عزل الحوار الأصلي واستخراج مسار الموسيقى بتقنية True Mid-Side (100% Speech-Free)...");
+        setRenderPct(12);
+        try {
+          const sepRes = await separateAudioInBrowser(targetVideoUrl, (pct, msg) => {
+            setRenderStep(`عزل الصوت: ${msg}`);
+            setRenderPct(10 + Math.round((pct / 100) * 15));
+          });
+          instUrl = sepRes.instrumentalAudioUrl;
+          setSeparatedInstUrl(sepRes.instrumentalAudioUrl);
+          setSeparatedVocalsUrl(sepRes.vocalsAudioUrl);
+        } catch (e) {
+          console.warn("Auto-separation in render click fallback:", e);
+        }
+      }
+
+      // 2. Render all dialogue and synthesize master multi-track audio
       const result = await renderMasterProject(
         project,
-        separatedInstUrl,
+        instUrl,
         (step, pct) => {
           setRenderStep(step);
           setRenderPct(Math.min(75, pct));
@@ -402,6 +506,14 @@ export default function AnimeDubStudioPage() {
       <main className="flex-1 w-full max-w-[1600px] mx-auto p-3 sm:p-4 lg:p-6 grid grid-cols-1 lg:grid-cols-12 gap-4 sm:gap-6 items-start overflow-x-hidden">
         {/* Mobile View: Render VideoCanvas FIRST (order-1 on mobile, order-2 on desktop) */}
         <div className="order-1 lg:order-2 lg:col-span-5 xl:col-span-4 space-y-4 lg:sticky lg:top-20 w-full max-w-full">
+          {/* Automatic Duration Match Banner */}
+          {syncAlert && (
+            <div className="p-3 rounded-xl bg-cyan-950/70 border border-cyan-500/50 text-cyan-200 text-xs flex items-center gap-2 shadow-lg animate-fade-in">
+              <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />
+              <span>{syncAlert}</span>
+            </div>
+          )}
+
           <VideoCanvas
             aspectRatio={aspectRatio}
             onToggleAspectRatio={setAspectRatio}
@@ -412,9 +524,11 @@ export default function AnimeDubStudioPage() {
             currentBeat={currentBeat}
             videoUrl={videoUrl}
             currentTime={currentTime}
+            seekTargetTime={seekTargetTime}
             isPlaying={isPlaying}
-            onTimeUpdate={setCurrentTime}
-            onDurationChange={setVideoDuration}
+            onTimeUpdate={handleVideoTimeUpdate}
+            onDurationChange={handleVideoDurationChange}
+            onEnded={handlePlaybackEnded}
           />
 
           {/* Dubbed Video Quick Action Banner */}
@@ -573,10 +687,7 @@ export default function AnimeDubStudioPage() {
               <StudioTimeline
                 project={project}
                 currentTime={currentTime}
-                onSeek={(time) => {
-                  setCurrentTime(time);
-                  triggeredSfxRef.current.clear();
-                }}
+                onSeek={handleSeek}
                 isPlaying={isPlaying}
                 onTogglePlay={() => setIsPlaying(!isPlaying)}
                 totalDuration={totalDuration}

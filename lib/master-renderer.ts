@@ -187,7 +187,7 @@ export async function renderMasterProject(
 
     let localCursor = shotStart;
 
-    // Render Voiceover if exists (Narrator speaks first)
+    // Render Voiceover if exists (Narrator speaks at shot start)
     if (shot.voiceover_audio_url) {
       const voBuffer = await fetchAndDecode(shot.voiceover_audio_url);
       if (voBuffer) {
@@ -197,22 +197,21 @@ export async function renderMasterProject(
         gain.gain.value = 1.0;
         source.connect(gain);
         gain.connect(offlineCtx.destination);
-        source.start(localCursor);
+        source.start(shotStart);
 
         const voDuration = voBuffer.duration || 2.5;
-        speechIntervals.push({ start: localCursor, end: localCursor + voDuration });
-        // Advance cursor with 250ms natural breath pause
-        localCursor += voDuration + 0.25;
+        speechIntervals.push({ start: shotStart, end: shotStart + voDuration });
+        localCursor = shotStart + voDuration + 0.15;
       }
     }
 
-    // Render Dialogues (ensure zero overlap with narrator or other characters)
+    // Render Dialogues: locked to shot start timestamps with natural spacing
     if (Array.isArray(shot.dialogue)) {
       for (const line of shot.dialogue) {
         if (line.audio_url) {
           const dlgBuffer = await fetchAndDecode(line.audio_url);
           if (dlgBuffer) {
-            // Respect trigger_sec only if it doesn't cause collision with previous speaker
+            // Respect trigger_sec relative to shotStart without drifting other shots
             const requestedStart = shotStart + (line.trigger_sec || 0);
             const actualStart = Math.max(requestedStart, localCursor);
 
@@ -226,14 +225,14 @@ export async function renderMasterProject(
 
             const lineDuration = dlgBuffer.duration || line.duration_sec || 2.0;
             speechIntervals.push({ start: actualStart, end: actualStart + lineDuration });
-            // Advance cursor to ensure next speaker never speaks at same time
-            localCursor = actualStart + lineDuration + 0.25;
+            localCursor = actualStart + lineDuration + 0.15;
           }
         }
       }
     }
 
-    accTime += Math.max(dur, localCursor - shotStart);
+    // Locked timeline: The start of the next shot is locked to shotStart + dur to match video cuts exactly
+    accTime = shotStart + dur;
   }
 
   // 3. Mix Background Music (BGM) with intelligent auto-ducking during speech

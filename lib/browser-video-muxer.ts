@@ -80,12 +80,12 @@ export async function muxVideoWithAudioInBrowser(
         setTimeout(() => res(), 4000); // Safety timeout
       });
 
-      const videoDuration = Math.min(Math.max(video.duration || 10, 5), 300);
-      onProgress?.(`تحضير إطارات الفيديو (${videoDuration.toFixed(1)}s) وحرق الترجمة والمؤثرات...`, 80);
-
       // 2. Decode master audio into AudioBuffer
       const audioArrayBuffer = await audioBlob.arrayBuffer();
       const audioBuffer = await audioCtx.decodeAudioData(audioArrayBuffer);
+
+      const targetDuration = Math.min(Math.max(video.duration || audioBuffer.duration || 10, audioBuffer.duration || 5, 5), 300);
+      onProgress?.(`تحضير إطارات الفيديو (${targetDuration.toFixed(1)}s) وحرق الترجمة والمؤثرات...`, 80);
 
       // 3. Setup Audio Graph to MediaStreamDestination
       const streamDestination = audioCtx.createMediaStreamDestination();
@@ -298,7 +298,7 @@ export async function muxVideoWithAudioInBrowser(
           videoBlob: finalBlob,
           videoUrl: finalUrl,
           mimeType: selectedMimeType,
-          duration: videoDuration,
+          duration: targetDuration,
         });
       };
 
@@ -314,10 +314,10 @@ export async function muxVideoWithAudioInBrowser(
       const startTime = Date.now();
       const progressInterval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
-        const pct = Math.min(98, 88 + Math.round((elapsed / videoDuration) * 10));
-        onProgress?.(`دمج الفيديو والصوت والترجمة: ${Math.round(elapsed)}s / ${Math.round(videoDuration)}s`, pct);
+        const pct = Math.min(98, 88 + Math.round((elapsed / targetDuration) * 10));
+        onProgress?.(`دمج الفيديو والصوت والترجمة: ${Math.round(elapsed)}s / ${Math.round(targetDuration)}s`, pct);
 
-        if (video.ended || elapsed >= videoDuration) {
+        if (video.ended || elapsed >= targetDuration) {
           clearInterval(progressInterval);
           if (recorder.state === "recording") {
             recorder.stop();
