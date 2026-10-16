@@ -566,6 +566,9 @@ export default function AnimeDubStudioPage() {
         onSelectAudioForProject={(url) => {
           setVideoUrl(url);
         }}
+        onSelectJsonForProject={(loadedProject) => {
+          setProject(loadedProject);
+        }}
       />
     </div>
   );

@@ -8,7 +8,8 @@ import {
   SAMPLE_PROJECT_JUJUTSU,
 } from "@/lib/sample-data";
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck } from "lucide-react";
+import { extractAndParseResilientJson } from "@/lib/resilient-json-parser";
+import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2 } from "lucide-react";
 import { saveMediaAsset } from "@/lib/project-storage";
 
 interface ProjectSetupProps {
@@ -75,31 +76,45 @@ export function ProjectSetup({
     setUrlStatus('empty');
   };
 
-  // Handle custom JSON upload with automatic normalization and local storage save
+  // Handle custom JSON upload with automatic resilient extraction, normalization, and local storage save
   const handleJsonUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
-        const parsed = JSON.parse(event.target?.result as string);
-        const normalized = normalizeNotebookLMProject(parsed);
+        const rawContent = (event.target?.result as string) || "";
+        const parseResult = extractAndParseResilientJson(rawContent);
+
+        if (!parseResult.success) {
+          setJsonError(parseResult.error || "تعذر قراءة ملف JSON.");
+          return;
+        }
+
+        const normalized = normalizeNotebookLMProject(parseResult.data);
         onUpdateProject(normalized);
-        setRawJsonText(JSON.stringify(normalized, null, 2));
+        const formatted = JSON.stringify(normalized, null, 2);
+        setRawJsonText(formatted);
         setJsonError(null);
 
-        // Save JSON to browser IndexedDB
+        // Save cleaned JSON to browser IndexedDB
         await saveMediaAsset({
           name: file.name,
           type: 'project_json',
-          blob: file,
+          blob: new Blob([formatted], { type: 'application/json' }),
           mimeType: 'application/json',
           metadata: {
             notes: `مشروع: ${normalized.project_info?.title || 'بدون عنوان'}`
           }
         });
-        setStorageNotice(`تم حفظ ملف المشروع «${file.name}» في ذاكرة المتصفح بنجاح!`);
-        setTimeout(() => setStorageNotice(null), 4000);
+
+        if (parseResult.wasCleaned) {
+          const detail = parseResult.cleanActions.length > 0 ? ` (${parseResult.cleanActions.join(' · ')})` : '';
+          setStorageNotice(`تم قراءة «${file.name}» بنجاح! تم استخراج كائن السيناريو وتجاوز الشروح والزوائد النصية${detail}.`);
+        } else {
+          setStorageNotice(`تم حفظ ملف المشروع «${file.name}» في ذاكرة المتصفح بنجاح!`);
+        }
+        setTimeout(() => setStorageNotice(null), 5000);
       } catch (err) {
         setJsonError("خطأ في قراءة ملف JSON: " + String(err));
       }
@@ -137,17 +152,38 @@ export function ProjectSetup({
     };
   };
 
-  // Apply raw JSON edits with normalization
+  // Apply raw JSON edits with resilient parsing & normalization
   const applyJsonEdits = () => {
-    try {
-      const parsed = JSON.parse(rawJsonText);
-      const normalized = normalizeNotebookLMProject(parsed);
-      onUpdateProject(normalized);
+    const parseResult = extractAndParseResilientJson(rawJsonText);
+    if (!parseResult.success) {
+      setJsonError(parseResult.error || "صيغة الـ JSON غير صحيحة، تأكد من الأقواس والفواصل.");
+      return;
+    }
+    const normalized = normalizeNotebookLMProject(parseResult.data);
+    onUpdateProject(normalized);
+    setRawJsonText(JSON.stringify(normalized, null, 2));
+    setJsonError(null);
+    setShowJsonEditor(false);
+    if (parseResult.wasCleaned) {
+      setStorageNotice("تم تنظيف وتطبيق سيناريو المشروع بنجاح!");
+      setTimeout(() => setStorageNotice(null), 4000);
+    }
+  };
+
+  // Auto clean & format JSON text in modal
+  const handleAutoCleanJson = () => {
+    const parseResult = extractAndParseResilientJson(rawJsonText);
+    if (parseResult.success) {
+      const normalized = normalizeNotebookLMProject(parseResult.data);
       setRawJsonText(JSON.stringify(normalized, null, 2));
       setJsonError(null);
-      setShowJsonEditor(false);
-    } catch {
-      setJsonError("صيغة الـ JSON غير صحيحة، تأكد من الأقواس والفواصل.");
+      const actionText = parseResult.cleanActions.length > 0 
+        ? ` (${parseResult.cleanActions.join(' · ')})` 
+        : '';
+      setStorageNotice(`تم تنظيف وتنسيق الكود بنجاح${actionText}!`);
+      setTimeout(() => setStorageNotice(null), 4000);
+    } else {
+      setJsonError(parseResult.error || "تعذر الإصلاح الآلي، يرجى فحص الأقواس يدوياً.");
     }
   };
 
@@ -348,7 +384,22 @@ export function ProjectSetup({
               />
             </label>
             {jsonError && (
-              <div className="text-[11px] text-rose-400">{jsonError}</div>
+              <div className="p-2.5 rounded-lg bg-rose-950/40 border border-rose-900 text-[11px] text-rose-300 space-y-1.5">
+                <div className="font-medium text-rose-200 flex items-center gap-1.5">
+                  <span>خطأ في قراءة ملف JSON:</span>
+                </div>
+                <div className="text-slate-300 font-mono text-[10px] break-words">{jsonError}</div>
+                <div className="flex items-center gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowJsonEditor(true)}
+                    className="px-2.5 py-1 text-[10px] font-semibold bg-rose-900/80 hover:bg-rose-800 text-rose-100 rounded-md transition cursor-pointer flex items-center gap-1"
+                  >
+                    <Code2 className="w-3 h-3" />
+                    <span>فتح محرر الكود للإصلاح</span>
+                  </button>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -380,6 +431,7 @@ export function ProjectSetup({
                 <span>محرر كود السيناريو JSON المباشر</span>
               </div>
               <button
+                type="button"
                 onClick={() => setShowJsonEditor(false)}
                 className="text-slate-400 hover:text-slate-200 text-xs cursor-pointer p-1"
               >
@@ -394,24 +446,45 @@ export function ProjectSetup({
             />
 
             {jsonError && (
-              <div className="text-xs text-rose-400 p-2 rounded-lg bg-rose-950/30 border border-rose-900">
-                {jsonError}
+              <div className="text-xs text-rose-400 p-2.5 rounded-lg bg-rose-950/40 border border-rose-900 flex items-center justify-between gap-2">
+                <span className="font-mono text-[11px]">{jsonError}</span>
+                <button
+                  type="button"
+                  onClick={handleAutoCleanJson}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-rose-800 hover:bg-rose-700 text-white rounded cursor-pointer shrink-0"
+                >
+                  إصلاح آلي
+                </button>
               </div>
             )}
 
-            <div className="flex items-center justify-end gap-2 pt-2 border-t border-slate-800">
+            <div className="flex flex-wrap items-center justify-between gap-2 pt-2 border-t border-slate-800">
               <button
-                onClick={() => setShowJsonEditor(false)}
-                className="px-3.5 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer min-h-[40px]"
+                type="button"
+                onClick={handleAutoCleanJson}
+                className="px-3.5 py-2 rounded-lg text-xs font-semibold text-amber-300 bg-amber-950/60 hover:bg-amber-900/70 border border-amber-600/40 transition-colors cursor-pointer min-h-[40px] flex items-center gap-1.5"
+                title="إزالة وسوم الماركداون والتعليقات والفواصل الزائدة وعزل كائن السيناريو تلقائياً"
               >
-                إلغاء
+                <Wand2 className="w-3.5 h-3.5" />
+                <span>إصلاح وتنظيف آلي للكود</span>
               </button>
-              <button
-                onClick={applyJsonEdits}
-                className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer min-h-[40px]"
-              >
-                حفظ وتطبيق
-              </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowJsonEditor(false)}
+                  className="px-3.5 py-2 rounded-lg text-xs text-slate-400 hover:text-slate-200 cursor-pointer min-h-[40px]"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={applyJsonEdits}
+                  className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-500 transition-colors cursor-pointer min-h-[40px]"
+                >
+                  حفظ وتطبيق
+                </button>
+              </div>
             </div>
           </div>
         </div>

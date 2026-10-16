@@ -433,3 +433,7 @@ export function validateNotebookLMJson(data: any): ValidationResult {
     }
   };
 }
+
+export { extractAndParseResilientJson } from './resilient-json-parser';
+export type { ResilientJsonResult } from './resilient-json-parser';
+

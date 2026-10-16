@@ -29,12 +29,15 @@ import {
   StoredMediaAsset,
   MediaType,
 } from '@/lib/project-storage';
+import { extractAndParseResilientJson } from '@/lib/resilient-json-parser';
+import { normalizeNotebookLMProject } from '@/lib/validate-json';
 
 interface StorageManagerProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectVideoForProject?: (videoUrl: string, fileName: string) => void;
   onSelectAudioForProject?: (audioUrl: string, fileName: string) => void;
+  onSelectJsonForProject?: (projectData: any, fileName: string) => void;
 }
 
 export default function StorageManager({
@@ -42,6 +45,7 @@ export default function StorageManager({
   onClose,
   onSelectVideoForProject,
   onSelectAudioForProject,
+  onSelectJsonForProject,
 }: StorageManagerProps) {
   const [assets, setAssets] = useState<StoredMediaAsset[]>([]);
   const [loading, setLoading] = useState(false);
@@ -178,6 +182,27 @@ export default function StorageManager({
 
   // Load asset into active project
   const handleLoadIntoProject = (asset: StoredMediaAsset) => {
+    if (asset.type === 'project_json') {
+      if (onSelectJsonForProject && asset.blob) {
+        asset.blob.text().then((rawText) => {
+          const parseResult = extractAndParseResilientJson(rawText);
+          if (parseResult.success) {
+            const normalized = normalizeNotebookLMProject(parseResult.data);
+            onSelectJsonForProject(normalized, asset.name);
+            setActionNotice(`تم استيراد سيناريو «${asset.name}» إلى المشروع بنجاح!`);
+            setTimeout(() => setActionNotice(null), 3000);
+            onClose();
+          } else {
+            setActionNotice(`خطأ في قراءة ملف السيناريو: ${parseResult.error}`);
+            setTimeout(() => setActionNotice(null), 4000);
+          }
+        }).catch((err) => {
+          setActionNotice(`تعذر قراءة الملف: ${String(err)}`);
+        });
+      }
+      return;
+    }
+
     const url = createAssetUrl(asset);
     if (asset.type === 'full_video') {
       if (onSelectVideoForProject) {
@@ -480,7 +505,7 @@ export default function StorageManager({
                     </button>
 
                     {/* Load into project */}
-                    {(asset.type === 'full_video' || asset.type === 'isolated_instrumental' || asset.type === 'isolated_vocal') && (
+                    {(asset.type === 'full_video' || asset.type === 'isolated_instrumental' || asset.type === 'isolated_vocal' || asset.type === 'project_json') && (
                       <button
                         onClick={() => handleLoadIntoProject(asset)}
                         title="تفعيل هذا الملف في ساحة العمل الحالية"
