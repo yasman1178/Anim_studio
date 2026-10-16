@@ -7,7 +7,10 @@ export type MediaType =
   | 'isolated_vocal' 
   | 'isolated_instrumental' 
   | 'tts_audio' 
-  | 'project_json';
+  | 'project_json'
+  | 'extracted_audio'
+  | 'raw_audio'
+  | 'custom_bgm';
 
 export interface StoredMediaAsset {
   id: string;

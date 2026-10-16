@@ -238,6 +238,26 @@ export async function decodeAudioFromMediaBlob(
 }
 
 /**
+ * Direct video audio extractor: Extracts high-fidelity 44.1kHz WAV from video
+ * and returns ready-to-download Blob and object URL.
+ */
+export async function extractWavFromVideo(
+  videoBlobOrUrl: Blob | string,
+  onProgress?: (progress: number, step: string) => void
+): Promise<{ wavBlob: Blob; wavUrl: string; duration: number }> {
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  const audioCtx = new AudioContextClass({ sampleRate: 44100 });
+  const buffer = await decodeAudioFromMediaBlob(videoBlobOrUrl, audioCtx, onProgress);
+  const wavBlob = bufferToWave(buffer);
+  const wavUrl = URL.createObjectURL(wavBlob);
+  return {
+    wavBlob,
+    wavUrl,
+    duration: Math.round(buffer.duration * 10) / 10,
+  };
+}
+
+/**
  * High quality in-browser vocal and instrumental separation.
  * Preserves true stereo balance, extracts centered dialogue formant band,
  * and eliminates out-of-phase comb filtering.
@@ -402,4 +422,27 @@ export async function separateAudioInBrowser(
     musicalKey: key,
     bpm
   };
+}
+
+/**
+ * Extracts pure 44.1kHz WAV audio from a video blob or URL directly in the browser
+ */
+export async function extractAudioFromVideoBlob(
+  blobOrUrl: Blob | string,
+  onProgress?: (progress: number, step: string) => void
+): Promise<{ audioBlob: Blob; audioUrl: string; duration: number }> {
+  const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+  const audioCtx = new AudioContextClass({ sampleRate: 44100 });
+  try {
+    const audioBuffer = await decodeAudioFromMediaBlob(blobOrUrl, audioCtx, onProgress);
+    const wavBlob = bufferToWave(audioBuffer);
+    const audioUrl = URL.createObjectURL(wavBlob);
+    return {
+      audioBlob: wavBlob,
+      audioUrl,
+      duration: Math.round(audioBuffer.duration * 10) / 10,
+    };
+  } finally {
+    audioCtx.close().catch(() => {});
+  }
 }

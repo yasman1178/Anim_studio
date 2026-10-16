@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import {
   NotebookLMProject,
   SAMPLE_PROJECT_SEIF_V18,
@@ -10,8 +10,13 @@ import {
 import { ValidationResult, normalizeNotebookLMProject } from "@/lib/validate-json";
 import { extractAndParseResilientJson } from "@/lib/resilient-json-parser";
 import { saveMediaAsset } from "@/lib/project-storage";
+import { extractAudioFromVideoBlob, downloadAudioBlob } from "@/lib/audio-separation";
 import { NOTEBOOKLM_EGYPTIAN_PROMPT } from "@/lib/notebooklm-prompt";
-import { Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, HardDrive, ShieldCheck, Wand2, Play, RotateCw, Video, Waves, BookOpen, Copy, Check } from "lucide-react";
+import { 
+  Upload, Film, FileJson, Link as LinkIcon, CheckCircle2, Sparkles, Code2, 
+  HardDrive, ShieldCheck, Wand2, Play, Pause, RotateCw, Video, Waves, 
+  BookOpen, Copy, Check, Download, Music, Trash2, Volume2, AlertCircle, FileAudio
+} from "lucide-react";
 
 interface ProjectSetupProps {
   project: NotebookLMProject;
@@ -23,6 +28,15 @@ interface ProjectSetupProps {
   onOpenStorageManager?: () => void;
   onStartAutoPipeline?: () => void;
   isPipelineRunning?: boolean;
+  // Audio extraction & Custom BGM props
+  extractedAudioUrl?: string | null;
+  extractedAudioBlob?: Blob | null;
+  onAudioExtracted?: (url: string, blob: Blob) => void;
+  isExtractingAudio?: boolean;
+  onTriggerAudioExtraction?: () => void;
+  customBgmUrl?: string | null;
+  customBgmName?: string | null;
+  onCustomBgmSelected?: (url: string | null, name?: string) => void;
 }
 
 export function ProjectSetup({
@@ -34,7 +48,15 @@ export function ProjectSetup({
   videoUrl,
   onOpenStorageManager,
   onStartAutoPipeline,
-  isPipelineRunning
+  isPipelineRunning,
+  extractedAudioUrl,
+  extractedAudioBlob,
+  onAudioExtracted,
+  isExtractingAudio,
+  onTriggerAudioExtraction,
+  customBgmUrl,
+  customBgmName,
+  onCustomBgmSelected
 }: ProjectSetupProps) {
   const [sourceUrl, setSourceUrl] = useState("");
   const [urlStatus, setUrlStatus] = useState<'empty' | 'received' | 'needs_local'>('empty');
@@ -42,6 +64,10 @@ export function ProjectSetup({
   const [rawJsonText, setRawJsonText] = useState(JSON.stringify(project, null, 2));
   const [jsonError, setJsonError] = useState<string | null>(null);
   const [storageNotice, setStorageNotice] = useState<string | null>(null);
+  const [isExtractedAudioPlaying, setIsExtractedAudioPlaying] = useState(false);
+  const [isBgmPlaying, setIsBgmPlaying] = useState(false);
+  const extractedAudioRef = useRef<HTMLAudioElement | null>(null);
+  const bgmAudioRef = useRef<HTMLAudioElement | null>(null);
 
   // Handle explicit video URL loading (YouTube or direct video URL)
   const handleLoadVideoUrl = () => {
@@ -149,12 +175,65 @@ export function ProjectSetup({
             duration: video.duration || undefined,
           }
         });
-        setStorageNotice(`تم حفظ كامل ملف الفيديو «${file.name}» (${(file.size / (1024 * 1024)).toFixed(1)} م.ب) في ذاكرة المتصفح بنجاح!`);
+        setStorageNotice(`تم حفظ كامل ملف الفيديو «${file.name}» (${(file.size / (1024 * 1024)).toFixed(1)} م.ب) واستخراج الصوت...`);
         setTimeout(() => setStorageNotice(null), 5000);
       } catch (err) {
         console.error("Failed to store video in IndexedDB:", err);
       }
+
+      // Auto-extract pure WAV audio from the uploaded video file
+      try {
+        const extracted = await extractAudioFromVideoBlob(file);
+        if (onAudioExtracted) {
+          onAudioExtracted(extracted.audioUrl, extracted.audioBlob);
+        }
+        await saveMediaAsset({
+          name: `صوت_مستخرج_${file.name.replace(/\.[^/.]+$/, "")}.wav`,
+          type: 'raw_audio',
+          blob: extracted.audioBlob,
+          mimeType: 'audio/wav',
+          metadata: {
+            duration: extracted.duration,
+            originalFileName: file.name
+          }
+        });
+        setStorageNotice(`تم استخراج مسار الصوت الأصلي بنجاح (${extracted.duration.toFixed(1)}s)! يمكنك تحميله بالأسفل.`);
+        setTimeout(() => setStorageNotice(null), 6000);
+      } catch (audioErr) {
+        console.warn("Could not auto-extract audio immediately:", audioErr);
+      }
     };
+  };
+
+  // Handle uploaded custom isolated BGM track
+  const handleCustomBgmUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const url = URL.createObjectURL(file);
+    if (onCustomBgmSelected) {
+      onCustomBgmSelected(url, file.name);
+    }
+    try {
+      await saveMediaAsset({
+        name: `موسيقى معزولة (${file.name})`,
+        type: 'custom_bgm',
+        blob: file,
+        mimeType: file.type || 'audio/mpeg',
+        metadata: {
+          originalFileName: file.name
+        }
+      });
+      setStorageNotice(`تم رفع واعتماد مسار الموسيقى المعزولة «${file.name}» بنجاح!`);
+      setTimeout(() => setStorageNotice(null), 5000);
+    } catch (err) {
+      console.error("Failed to store custom BGM:", err);
+    }
+  };
+
+  const handleClearCustomBgm = () => {
+    if (bgmAudioRef.current) bgmAudioRef.current.pause();
+    setIsBgmPlaying(false);
+    onCustomBgmSelected?.(null, undefined);
   };
 
   // Apply raw JSON edits with resilient parsing & normalization
@@ -468,6 +547,188 @@ export function ProjectSetup({
               </div>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* Real Audio Hub: Auto-Extracted Audio Track + Dedicated Custom BGM Upload Slot */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {/* Card 1: Auto-Extracted Audio Track with Direct WAV Download */}
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+              <FileAudio className="w-3.5 h-3.5 text-cyan-400" />
+              <span>الصوت الأصلي المستخرج من الفيديو (WAV)</span>
+            </span>
+            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+              extractedAudioUrl 
+                ? "bg-cyan-950/60 border-cyan-700/60 text-cyan-300"
+                : isExtractingAudio
+                ? "bg-amber-950/60 border-amber-700/60 text-amber-300 animate-pulse"
+                : "bg-slate-900 border-slate-800 text-slate-400"
+            }`}>
+              {extractedAudioUrl ? "صوت مستخرج جاهز" : isExtractingAudio ? "جارِ الاستخراج..." : "في انتظار رفع الفيديو"}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            يقوم النظام تلقائياً باستخراج مسار الصوت الأصلي بجودة 44.1kHz WAV وحفظه في التخزين؛ يمكنك تحميله لعزل الموسيقى عبر أي أداة خارجية (مثل VocalRemover) ثم رفع الموسيقى الناتجة بالخانة المقابلة.
+          </p>
+
+          {isExtractingAudio ? (
+            <div className="p-3 rounded-lg bg-cyan-950/30 border border-cyan-800/50 flex items-center gap-2.5 text-xs text-cyan-300">
+              <RotateCw className="w-4 h-4 animate-spin text-cyan-400 shrink-0" />
+              <span>جارِ استخراج وفك تشفير مسار الصوت من الفيديو في المتصفح...</span>
+            </div>
+          ) : extractedAudioUrl ? (
+            <div className="space-y-2 p-3 rounded-xl bg-slate-900 border border-cyan-900/50">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-slate-300 font-mono">مسار الصوت الأصلي المستخرج</span>
+                <span className="text-[10px] text-emerald-400 font-medium">✅ محفوظ في التخزين</span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!extractedAudioRef.current) return;
+                    if (isExtractedAudioPlaying) {
+                      extractedAudioRef.current.pause();
+                      setIsExtractedAudioPlaying(false);
+                    } else {
+                      extractedAudioRef.current.play();
+                      setIsExtractedAudioPlaying(true);
+                    }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition cursor-pointer"
+                >
+                  {isExtractedAudioPlaying ? <Pause className="w-3.5 h-3.5 text-rose-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
+                  <span>{isExtractedAudioPlaying ? "إيقاف مؤقت" : "استماع للصوت المستخرج"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (extractedAudioBlob) {
+                      downloadAudioBlob(extractedAudioBlob, `extracted_audio_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.wav`);
+                    } else if (extractedAudioUrl) {
+                      const a = document.createElement("a");
+                      a.href = extractedAudioUrl;
+                      a.download = `extracted_audio.wav`;
+                      a.click();
+                    }
+                  }}
+                  className="flex items-center gap-1.5 py-2 px-3 rounded-lg bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 text-white text-xs font-bold transition shadow-md shadow-cyan-950 cursor-pointer shrink-0"
+                  title="تحميل ملف الصوت المستخرج كـ WAV بجودة عالية"
+                >
+                  <Download className="w-3.5 h-3.5" />
+                  <span>تحميل الصوت المستخرج (WAV)</span>
+                </button>
+              </div>
+
+              <audio
+                ref={extractedAudioRef}
+                src={extractedAudioUrl}
+                onEnded={() => setIsExtractedAudioPlaying(false)}
+                className="hidden"
+              />
+            </div>
+          ) : (
+            <div className="flex items-center justify-between p-2.5 rounded-lg bg-slate-900 border border-dashed border-slate-800 text-xs text-slate-400">
+              <span>ارفع ملف فيديو MP4 وسيقوم النظام باستخراج الصوت تلقائياً</span>
+              {videoUrl && onTriggerAudioExtraction && (
+                <button
+                  type="button"
+                  onClick={onTriggerAudioExtraction}
+                  className="px-2.5 py-1 text-[11px] font-semibold bg-cyan-600 hover:bg-cyan-500 text-white rounded transition cursor-pointer"
+                >
+                  استخراج الصوت الآن
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Card 2: Dedicated Custom Isolated BGM Slot */}
+        <div className="p-3.5 sm:p-4 rounded-xl bg-slate-950/70 border border-slate-800 space-y-3">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+              <Music className="w-3.5 h-3.5 text-rose-400" />
+              <span>رفع مسار الموسيقى المعزولة (BGM Slot)</span>
+            </span>
+            <span className={`text-[10px] font-mono px-2 py-0.5 rounded border ${
+              customBgmUrl 
+                ? "bg-emerald-950/60 border-emerald-700/60 text-emerald-300" 
+                : "bg-slate-900 border-slate-800 text-slate-400"
+            }`}>
+              {customBgmUrl ? "الموسيقى مفعلة للماستر" : "اختياري / يدوي"}
+            </span>
+          </div>
+
+          <p className="text-[11px] text-slate-400 leading-relaxed">
+            ارفع ملف الموسيقى الخالي من الأصوات البشرية (MP3 أو WAV)؛ ليدمجه النظام مباشرة مع الدبلجة المصرية والمؤثرات الصوتية والترجمة الحرفية عند التصدير.
+          </p>
+
+          {customBgmUrl ? (
+            <div className="space-y-2 p-3 rounded-xl bg-slate-900 border border-emerald-900/50">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-emerald-300 font-semibold truncate max-w-[200px]">
+                  🎵 {customBgmName || "مسار الموسيقى المعزولة المرفوع"}
+                </span>
+                <span className="text-[10px] text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800">
+                  جاهز للدمج مع الفيديو
+                </span>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!bgmAudioRef.current) return;
+                    if (isBgmPlaying) {
+                      bgmAudioRef.current.pause();
+                      setIsBgmPlaying(false);
+                    } else {
+                      bgmAudioRef.current.play();
+                      setIsBgmPlaying(true);
+                    }
+                  }}
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-medium text-slate-200 transition cursor-pointer"
+                >
+                  {isBgmPlaying ? <Pause className="w-3.5 h-3.5 text-rose-400" /> : <Play className="w-3.5 h-3.5 text-emerald-400" />}
+                  <span>{isBgmPlaying ? "إيقاف مؤقت" : "معاينة الموسيقى"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleClearCustomBgm}
+                  className="flex items-center gap-1 py-2 px-2.5 rounded-lg bg-slate-800 hover:bg-rose-950 hover:text-rose-300 text-slate-400 text-xs transition cursor-pointer border border-slate-700 shrink-0"
+                  title="إزالة هذا المسار"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>إزالة</span>
+                </button>
+              </div>
+
+              <audio
+                ref={bgmAudioRef}
+                src={customBgmUrl}
+                onEnded={() => setIsBgmPlaying(false)}
+                className="hidden"
+              />
+            </div>
+          ) : (
+            <label className="flex flex-col items-center justify-center gap-1.5 p-4 border border-dashed border-slate-700 hover:border-rose-500 rounded-xl bg-slate-900/60 hover:bg-slate-900 text-xs text-slate-300 cursor-pointer transition-colors min-h-[72px] text-center">
+              <Upload className="w-4 h-4 text-rose-400" />
+              <span className="font-semibold text-slate-200">اختر أو اسحب ملف الموسيقى المعزولة (MP3, WAV, M4A)</span>
+              <span className="text-[10px] text-slate-500">سيتم استبدال الموسيقى الأصلية بهذا المسار في الفيديو المصدّر</span>
+              <input
+                type="file"
+                accept="audio/*,.mp3,.wav,.m4a,.aac,.ogg"
+                onChange={handleCustomBgmUpload}
+                className="hidden"
+              />
+            </label>
+          )}
         </div>
       </div>
 

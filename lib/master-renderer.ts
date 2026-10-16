@@ -305,8 +305,13 @@ export async function renderMasterProject(
 export async function runFullAutomatedDubPipeline(
   project: NotebookLMProject,
   videoInput: Blob | string | null,
-  onProgress?: (step: string, pct: number) => void
+  onProgress?: (step: string, pct: number) => void,
+  options?: {
+    aspectRatio?: '9:16' | '16:9';
+    customBgmUrl?: string | null;
+  }
 ): Promise<FullPipelineResult> {
+  const chosenAspectRatio = options?.aspectRatio || '9:16';
   onProgress?.("بدء خط الأنابيب التلقائي: قراءة ملف الفيديو والسيناريو...", 5);
 
   let targetVideoBlob: Blob | null = null;
@@ -340,13 +345,16 @@ export async function runFullAutomatedDubPipeline(
     }
   }
 
-  // Step 1: Extract and separate audio from video (FFmpeg Server + In-Browser DSP)
-  onProgress?.("المرحلة 1: عزل الحوار الأصلي وفصل مسار الموسيقى التصويرية (BGM)...", 15);
+  // Step 1: Extract and separate audio from video (or use uploaded custom BGM)
   let separatedStems: SeparationResult | null = null;
-  let bgmUrl: string | null = null;
+  let bgmUrl: string | null = options?.customBgmUrl || null;
 
-  try {
-    if (targetVideoBlob && targetVideoBlob.size > 0 && targetVideoBlob.size < 30 * 1024 * 1024) {
+  if (bgmUrl) {
+    onProgress?.("استخدام مسار الموسيقى المعزولة المرفوع للمشروع (BGM Ready)...", 20);
+  } else {
+    onProgress?.("المرحلة 1: عزل الحوار الأصلي واستخراج مسار الموسيقى (BGM)...", 15);
+    try {
+      if (targetVideoBlob && targetVideoBlob.size > 0 && targetVideoBlob.size < 30 * 1024 * 1024) {
       onProgress?.("تشغيل خوارزمية عزل الصوت الاستريو FFmpeg...", 20);
       const sepForm = new FormData();
       const vFile = new File([targetVideoBlob], "video.mp4", { type: targetVideoBlob.type || "video/mp4" });
@@ -388,6 +396,7 @@ export async function runFullAutomatedDubPipeline(
       console.warn("Audio separation fallback:", sepErr);
     }
   }
+  } // End of BGM separation else-block
 
   // Step 2 & 3: Generate all Edge-TTS lines and mix master audio
   onProgress?.("المرحلة 2 و 3: توليد مقاطع الدبلجة المصرية ومزجها مع BGM...", 40);
@@ -395,55 +404,55 @@ export async function runFullAutomatedDubPipeline(
     onProgress?.(step, 40 + Math.round((pct / 100) * 40));
   });
 
-  // Step 4: Mux Video + Dubbed Audio into final MP4/WebM video
-  onProgress?.("المرحلة 4: دمج إطارات الفيديو مع الصوت المدبلج الجديد...", 85);
+  // Step 4: Mux Video + Dubbed Audio into final MP4/WebM video with burned-in subtitles & chosen aspect ratio
+  onProgress?.(`المرحلة 4: دمج إطارات الفيديو مع الترجمة والمؤثرات بنسبة (${chosenAspectRatio === '16:9' ? '16:9 يوتيوب' : '9:16 شورتس'})...`, 85);
   let dubbedVideoUrl: string | null = null;
 
-  // Attempt 1: Server-side FFmpeg Muxer
+  // Attempt 1: In-Browser Universal Video Muxer (Paints 16:9 or 9:16, burns subtitles & VFX)
   try {
-    if (targetVideoBlob) {
-      const muxFormData = new FormData();
-      const vidFile = new File([targetVideoBlob], "video.mp4", { type: "video/mp4" });
-      const audFile = new File([masterAudioResult.masterBlob], "master.wav", { type: "audio/wav" });
-      muxFormData.append("video", vidFile);
-      muxFormData.append("audio", audFile);
-
-      const muxRes = await fetch("/api/mux-video", {
-        method: "POST",
-        body: muxFormData,
-      });
-
-      if (muxRes.ok) {
-        const muxData = await muxRes.json();
-        if (muxData.success && muxData.video_url) {
-          dubbedVideoUrl = muxData.video_url;
-        }
+    const videoSourceForMux = targetVideoBlob || videoSourceUrl || "/sample_anime.mp4";
+    const browserMux = await muxVideoWithAudioInBrowser(
+      videoSourceForMux,
+      masterAudioResult.masterBlob,
+      {
+        project,
+        burnSubtitlesAndVfx: true,
+        aspectRatio: chosenAspectRatio,
+        onProgress: (msg, pct) => onProgress?.(msg, pct),
       }
+    );
+    if (browserMux && browserMux.videoUrl) {
+      dubbedVideoUrl = browserMux.videoUrl;
     }
-  } catch (serverMuxErr) {
-    console.warn("Server FFmpeg muxing skipped or unavailable on this host:", serverMuxErr);
+  } catch (browserMuxErr) {
+    console.error("Browser video muxing error, falling back to server:", browserMuxErr);
   }
 
-  // Attempt 2: In-Browser Universal Video Muxer (100% works on Vercel, mobile, and serverless)
+  // Attempt 2: Server-side FFmpeg Muxer fallback
   if (!dubbedVideoUrl) {
-    onProgress?.("تفعيل محرك دمج الفيديو المباشر داخل المتصفح لبيئة Vercel...", 90);
+    onProgress?.("تشغيل خادم دمج الفيديو البديل FFmpeg...", 92);
     try {
-      const videoSourceForMux = targetVideoBlob || videoSourceUrl || "/sample_anime.mp4";
-      const browserMux = await muxVideoWithAudioInBrowser(
-        videoSourceForMux,
-        masterAudioResult.masterBlob,
-        {
-          project,
-          burnSubtitlesAndVfx: true,
-          aspectRatio: '9:16',
-          onProgress: (msg, pct) => onProgress?.(msg, pct),
+      if (targetVideoBlob) {
+        const muxFormData = new FormData();
+        const vidFile = new File([targetVideoBlob], "video.mp4", { type: "video/mp4" });
+        const audFile = new File([masterAudioResult.masterBlob], "master.wav", { type: "audio/wav" });
+        muxFormData.append("video", vidFile);
+        muxFormData.append("audio", audFile);
+
+        const muxRes = await fetch("/api/mux-video", {
+          method: "POST",
+          body: muxFormData,
+        });
+
+        if (muxRes.ok) {
+          const muxData = await muxRes.json();
+          if (muxData.success && muxData.video_url) {
+            dubbedVideoUrl = muxData.video_url;
+          }
         }
-      );
-      if (browserMux && browserMux.videoUrl) {
-        dubbedVideoUrl = browserMux.videoUrl;
       }
-    } catch (browserMuxErr) {
-      console.error("Browser video muxing error:", browserMuxErr);
+    } catch (serverMuxErr) {
+      console.warn("Server FFmpeg muxing skipped or unavailable:", serverMuxErr);
     }
   }
 

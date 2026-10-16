@@ -200,20 +200,19 @@ export async function muxVideoWithAudioInBrowser(
             ctx.fillRect(0, 0, targetWidth, targetHeight);
           }
 
-          // Render styled Arabic Subtitles Banner at bottom
+          // Render styled Arabic Subtitles Banner at bottom (adaptive to 16:9 & 9:16)
           if (activeSub && activeSub.text) {
-            const bannerY = targetHeight - (isVertical ? 180 : 110);
-            const bannerH = isVertical ? 90 : 65;
-
-            // Translucent rounded backdrop
-            ctx.save();
-            ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
-            ctx.strokeStyle = "rgba(244, 63, 94, 0.4)";
-            ctx.lineWidth = 2;
-            
-            const rectX = targetWidth * 0.05;
-            const rectW = targetWidth * 0.90;
+            const bannerY = isVertical ? targetHeight - 190 : targetHeight - 95;
+            const bannerH = isVertical ? 96 : 70;
+            const rectX = targetWidth * 0.04;
+            const rectW = targetWidth * 0.92;
             const radius = 16;
+
+            // Translucent rounded backdrop with subtle neon border
+            ctx.save();
+            ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+            ctx.strokeStyle = "rgba(244, 63, 94, 0.55)";
+            ctx.lineWidth = 2.5;
             
             ctx.beginPath();
             ctx.roundRect(rectX, bannerY, rectW, bannerH, radius);
@@ -221,18 +220,26 @@ export async function muxVideoWithAudioInBrowser(
             ctx.stroke();
 
             // Speaker Tag Badge
-            ctx.font = `bold ${isVertical ? 18 : 15}px system-ui, -apple-system, sans-serif`;
+            ctx.font = `bold ${isVertical ? 17 : 15}px system-ui, -apple-system, sans-serif`;
             ctx.fillStyle = "#FDA4AF";
             ctx.textAlign = "right";
             ctx.direction = "rtl";
-            ctx.fillText(`[${activeSub.speaker}]`, rectX + rectW - 20, bannerY + (isVertical ? 30 : 24));
+            ctx.fillText(`[${activeSub.speaker}]`, rectX + rectW - 18, bannerY + (isVertical ? 30 : 25));
 
-            // Spoken Arabic Line
-            ctx.font = `bold ${isVertical ? 22 : 18}px system-ui, -apple-system, sans-serif`;
+            // Spoken Arabic Line with auto-fit scaling for long sentences
+            let fontSize = isVertical ? 22 : 19;
+            ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+            const maxTextWidth = rectW - 40;
+            const measured = ctx.measureText(activeSub.text).width;
+            if (measured > maxTextWidth) {
+              fontSize = Math.max(13, Math.floor(fontSize * (maxTextWidth / measured)));
+              ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+            }
+
             ctx.fillStyle = "#FFFFFF";
             ctx.textAlign = "center";
             ctx.direction = "rtl";
-            ctx.fillText(activeSub.text, targetWidth / 2, bannerY + (isVertical ? 65 : 48));
+            ctx.fillText(activeSub.text, targetWidth / 2, bannerY + (isVertical ? 68 : 53));
             ctx.restore();
           }
         }
@@ -275,9 +282,12 @@ export async function muxVideoWithAudioInBrowser(
         }
       };
 
+      const startTime = Date.now();
       let animLoopId: number;
       const renderLoop = () => {
-        drawFrame(video.currentTime);
+        const wallClockTime = (Date.now() - startTime) / 1000;
+        const currentT = (!isNaN(video.currentTime) && video.currentTime > 0) ? video.currentTime : wallClockTime;
+        drawFrame(currentT);
         if (recorder.state === "recording") {
           animLoopId = requestAnimationFrame(renderLoop);
         }
@@ -310,8 +320,6 @@ export async function muxVideoWithAudioInBrowser(
       renderLoop();
 
       onProgress?.("جارِ مزامنة وتسجيل إطارات الفيديو مع أصوات الدبلجة المصرية...", 88);
-
-      const startTime = Date.now();
       const progressInterval = setInterval(() => {
         const elapsed = (Date.now() - startTime) / 1000;
         const pct = Math.min(98, 88 + Math.round((elapsed / targetDuration) * 10));

@@ -14,11 +14,11 @@ import { PublishingHub } from "@/components/PublishingHub";
 import StorageManager from "@/components/StorageManager";
 import { SAMPLE_PROJECT_SEIF_V18, NotebookLMProject } from "@/lib/sample-data";
 import { validateNotebookLMJson } from "@/lib/validate-json";
-import { getStorageStats } from "@/lib/project-storage";
+import { getStorageStats, saveMediaAsset } from "@/lib/project-storage";
 import { playSfx } from "@/lib/sfx-synthesizer";
 import { renderMasterProject, runFullAutomatedDubPipeline } from "@/lib/master-renderer";
 import { muxVideoWithAudioInBrowser } from "@/lib/browser-video-muxer";
-import { separateAudioInBrowser } from "@/lib/audio-separation";
+import { separateAudioInBrowser, extractAudioFromVideoBlob } from "@/lib/audio-separation";
 import { CheckCircle2, Sparkles, MonitorPlay, Play, Pause, Download, Volume2, RotateCw, Video, Film, Wand2, Waves, Check } from "lucide-react";
 
 // Pure helper to derive current active VFX, Text Overlay, Voiceover, Camera motion and Beats
@@ -94,6 +94,11 @@ export default function AnimeDubStudioPage() {
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
   const [separatedVocalsUrl, setSeparatedVocalsUrl] = useState<string | null>(null);
   const [separatedInstUrl, setSeparatedInstUrl] = useState<string | null>(null);
+  const [customBgmUrl, setCustomBgmUrl] = useState<string | null>(null);
+  const [customBgmName, setCustomBgmName] = useState<string | null>(null);
+  const [extractedAudioUrl, setExtractedAudioUrl] = useState<string | null>(null);
+  const [extractedAudioBlob, setExtractedAudioBlob] = useState<Blob | null>(null);
+  const [isExtractingAudio, setIsExtractingAudio] = useState<boolean>(false);
 
   // Playback & VFX state (defaults to 9:16 Shorts)
   const [currentTime, setCurrentTime] = useState(0);
@@ -328,6 +333,32 @@ export default function AnimeDubStudioPage() {
     manualVfxType
   );
 
+  // Manual trigger for audio extraction from video
+  const handleTriggerAudioExtraction = async () => {
+    const target = videoUrl || "/sample_anime.mp4";
+    setIsExtractingAudio(true);
+    try {
+      const extracted = await extractAudioFromVideoBlob(target);
+      setExtractedAudioUrl(extracted.audioUrl);
+      setExtractedAudioBlob(extracted.audioBlob);
+      await saveMediaAsset({
+        name: `صوت_مستخرج_${(project.project_info.title || 'anime').replace(/\s+/g, '_')}.wav`,
+        type: "raw_audio",
+        blob: extracted.audioBlob,
+        mimeType: "audio/wav",
+        metadata: {
+          duration: extracted.duration,
+          notes: "مستخرج آلياً من الفيديو في المتصفح"
+        }
+      });
+    } catch (e) {
+      console.error("Audio extraction failed:", e);
+      alert("تعذر استخراج الصوت من الفيديو: " + String(e));
+    } finally {
+      setIsExtractingAudio(false);
+    }
+  };
+
   // 1-Click Automated Dubbing Pipeline Handler
   const handleStartAutoPipeline = async () => {
     setIsAutoPipelineRunning(true);
@@ -343,6 +374,10 @@ export default function AnimeDubStudioPage() {
         (step, pct) => {
           setRenderStep(step);
           setRenderPct(pct);
+        },
+        {
+          aspectRatio,
+          customBgmUrl
         }
       );
 
@@ -377,10 +412,14 @@ export default function AnimeDubStudioPage() {
 
     try {
       // 1. Ensure clean speech-free instrumental background track exists
-      let instUrl = separatedInstUrl;
+      // Prioritize uploaded custom BGM first!
+      let instUrl = customBgmUrl || separatedInstUrl;
       const targetVideoUrl = videoUrl || "/sample_anime.mp4";
 
-      if (!instUrl && targetVideoUrl) {
+      if (customBgmUrl) {
+        setRenderStep("استخدام مسار الموسيقى المعزولة المرفوع للمشروع (BGM Ready)...");
+        setRenderPct(15);
+      } else if (!instUrl && targetVideoUrl) {
         setRenderStep("عزل الحوار الأصلي واستخراج مسار الموسيقى بتقنية True Mid-Side (100% Speech-Free)...");
         setRenderPct(12);
         try {
@@ -408,69 +447,67 @@ export default function AnimeDubStudioPage() {
       setProject(result.updatedProject);
       setMasterAudioUrl(result.masterAudioUrl);
 
-      // 2. Mux video picture with the newly dubbed audio into a real MP4 video
-      setRenderStep("دمج إطارات الفيديو مع الصوت المدبلج الجديد (FFmpeg MP4 Muxer)...");
+      // 3. Mux video picture with the newly dubbed audio into a real MP4 video with burned-in subtitles and selected aspect ratio
+      setRenderStep(`دمج إطارات الفيديو مع الترجمة والمؤثرات بنسبة (${aspectRatio === '16:9' ? '16:9 يوتيوب' : '9:16 شورتس'})...`);
       setRenderPct(85);
 
       let finalDubbedUrl: string | null = null;
 
-      // Primary: Server-side FFmpeg Muxer
+      // Primary: Universal In-Browser Muxer with Burned-In Subtitles, VFX & selected Aspect Ratio
       try {
-        let videoBlob: Blob | null = null;
-        const targetVideoUrl = videoUrl || "/sample_anime.mp4";
-
-        const vRes = await fetch(targetVideoUrl);
-        if (vRes.ok) {
-          videoBlob = await vRes.blob();
-        }
-
-        if (videoBlob) {
-          const muxFormData = new FormData();
-          const vidFile = new File([videoBlob], "video.mp4", { type: "video/mp4" });
-          const audFile = new File([result.masterBlob], "master.wav", { type: "audio/wav" });
-          muxFormData.append("video", vidFile);
-          muxFormData.append("audio", audFile);
-
-          const muxRes = await fetch("/api/mux-video", {
-            method: "POST",
-            body: muxFormData,
-          });
-
-          if (muxRes.ok) {
-            const muxData = await muxRes.json();
-            if (muxData.success && muxData.video_url) {
-              finalDubbedUrl = muxData.video_url;
+        const targetVideo = videoUrl || "/sample_anime.mp4";
+        const browserMux = await muxVideoWithAudioInBrowser(
+          targetVideo,
+          result.masterBlob,
+          {
+            project: result.updatedProject,
+            burnSubtitlesAndVfx: true,
+            aspectRatio: aspectRatio,
+            onProgress: (step, pct) => {
+              setRenderStep(step);
+              setRenderPct(pct);
             }
           }
+        );
+        if (browserMux && browserMux.videoUrl) {
+          finalDubbedUrl = browserMux.videoUrl;
         }
-      } catch (muxErr) {
-        console.warn("Server video muxing failed, using browser fallback:", muxErr);
+      } catch (bErr) {
+        console.error("Browser video muxing fallback error:", bErr);
       }
 
-      // Secondary: Universal In-Browser Muxer with Burned-In Subtitles & VFX (Guaranteed to work on Vercel)
+      // Secondary: Server-side FFmpeg Muxer fallback
       if (!finalDubbedUrl) {
-        setRenderStep("تفعيل محرك دمج وحرق الفيديو والمؤثرات داخل المتصفح (دعم Vercel)...");
-        setRenderPct(90);
         try {
-          const targetVideo = videoUrl || "/sample_anime.mp4";
-          const browserMux = await muxVideoWithAudioInBrowser(
-            targetVideo,
-            result.masterBlob,
-            {
-              project: result.updatedProject,
-              burnSubtitlesAndVfx: true,
-              aspectRatio: aspectRatio,
-              onProgress: (step, pct) => {
-                setRenderStep(step);
-                setRenderPct(pct);
+          let videoBlob: Blob | null = null;
+          const targetVideoUrl = videoUrl || "/sample_anime.mp4";
+
+          const vRes = await fetch(targetVideoUrl);
+          if (vRes.ok) {
+            videoBlob = await vRes.blob();
+          }
+
+          if (videoBlob) {
+            const muxFormData = new FormData();
+            const vidFile = new File([videoBlob], "video.mp4", { type: "video/mp4" });
+            const audFile = new File([result.masterBlob], "master.wav", { type: "audio/wav" });
+            muxFormData.append("video", vidFile);
+            muxFormData.append("audio", audFile);
+
+            const muxRes = await fetch("/api/mux-video", {
+              method: "POST",
+              body: muxFormData,
+            });
+
+            if (muxRes.ok) {
+              const muxData = await muxRes.json();
+              if (muxData.success && muxData.video_url) {
+                finalDubbedUrl = muxData.video_url;
               }
             }
-          );
-          if (browserMux && browserMux.videoUrl) {
-            finalDubbedUrl = browserMux.videoUrl;
           }
-        } catch (bErr) {
-          console.error("Browser video muxing fallback error:", bErr);
+        } catch (muxErr) {
+          console.warn("Server video muxing failed, using browser fallback:", muxErr);
         }
       }
 
@@ -641,6 +678,23 @@ export default function AnimeDubStudioPage() {
                 onOpenStorageManager={() => setIsStorageOpen(true)}
                 onStartAutoPipeline={handleStartAutoPipeline}
                 isPipelineRunning={isAutoPipelineRunning}
+                extractedAudioUrl={extractedAudioUrl}
+                extractedAudioBlob={extractedAudioBlob}
+                onAudioExtracted={(url, blob) => {
+                  setExtractedAudioUrl(url);
+                  setExtractedAudioBlob(blob);
+                }}
+                isExtractingAudio={isExtractingAudio}
+                onTriggerAudioExtraction={handleTriggerAudioExtraction}
+                customBgmUrl={customBgmUrl}
+                customBgmName={customBgmName}
+                onCustomBgmSelected={(url, name) => {
+                  setCustomBgmUrl(url);
+                  setCustomBgmName(name || null);
+                  if (url) {
+                    setSeparatedInstUrl(url);
+                  }
+                }}
               />
               <ValidationReport
                 validation={validation}
